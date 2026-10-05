@@ -187,6 +187,13 @@
  * 列宽由 CSS 决定（不再用 JS 测量）：额度卡承载水位条，取 340px 下限，
  * 与认证文件页配额模式（.gridQuota）同一档。 */
 
+.ledger {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-top: 1px solid var(--border-color);
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -217,4 +224,14 @@
   .page {
     gap: 16px;
   }
+}
+
+/* Sort and view sit together at the trailing edge of the toolbar. */
+.sort {
+  margin-left: auto;
+}
+
+.view {
+  @extend .sort;
+  min-width: 120px;
 }

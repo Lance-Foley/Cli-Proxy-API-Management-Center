@@ -289,6 +289,56 @@
   }
 }
 
+/* ---------- Ledger variant: one flat line per credential ---------- */
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 14px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  background: none;
+
+  .head {
+    align-self: start;
+  }
+
+  .body {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    align-items: start;
+    gap: 10px 20px;
+  }
+
+  .actionRow {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .row:hover {
+    transform: none;
+    box-shadow: none;
+    background: color-mix(in srgb, var(--bg-tertiary) 35%, transparent);
+  }
+}
+
+@media (max-width: 860px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px 0;
+  }
+
+  .row .actionRow {
+    justify-content: flex-start;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card,
   .idleBody,
