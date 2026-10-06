@@ -187,13 +187,8 @@ export function AntigravityQuotaBody({ quota, classes }: QuotaBodyProps<Antigrav
               </div>
               {group.buckets.map((bucket, index) => {
                 const clamped = Math.max(0, Math.min(1, bucket.remainingFraction));
-                const percent = clamped * 100;
-                const percentLabel =
-                  bucket.remainingFraction === 1
-                    ? t('antigravity_quota.quota_available')
-                    : t('antigravity_quota.remaining_percent', {
-                        percent: Math.round(percent),
-                      });
+                const usedPercent = (1 - clamped) * 100;
+                const percentLabel = `${Math.round(usedPercent)}%`;
                 const resetLabel = formatAntigravityResetLabel(bucket.resetTime, t, nowMs);
                 const bucketLabel = translateAntigravityQuotaLabel(
                   bucket.label,
@@ -227,7 +222,7 @@ export function AntigravityQuotaBody({ quota, classes }: QuotaBodyProps<Antigrav
                         </span>
                       </div>
                     </div>
-                    <QuotaMeter percent={percent} classes={classes} index={index} />
+                    <QuotaMeter percent={usedPercent} classes={classes} index={index} />
                   </div>
                 );
               })}

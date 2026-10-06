@@ -543,8 +543,8 @@
     "plan_business_premium": "Business Premium"
   },
   "devin_quota": {
-    "daily": "每日剩餘額度",
-    "weekly": "每週剩餘額度",
+    "daily": "每日額度",
+    "weekly": "每週額度",
     "plan_label": "方案",
     "plan_end": "訂閱到期",
     "unavailable": "暫無資料",

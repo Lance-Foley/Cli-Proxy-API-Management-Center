@@ -77,7 +77,7 @@ describe('Muse quota UI integration', () => {
     expect(buildTabCounts(entries).meta).toBe(1);
   });
 
-  test('converts used percent into remaining meters and displays plan and windows', () => {
+  test('shows used percent on the meters and displays plan and windows', () => {
     const markup = renderToStaticMarkup(
       createElement(MetaQuotaBody, { quota: snapshot(), classes })
     );
@@ -86,10 +86,12 @@ describe('Muse quota UI integration', () => {
     expect(markup).toContain(i18n.t('meta_quota.window_duration', { minutes: 300 }));
     expect(markup).toContain(i18n.t('meta_quota.weekly'));
     expect(markup.match(/role="meter"/g)).toHaveLength(2);
-    expect(markup).toContain('aria-valuenow="100"');
-    expect(markup).toContain('aria-valuenow="99"');
-    expect(markup).toContain('width:100%');
-    expect(markup).toContain('width:99%');
+    expect(markup).toContain('aria-valuenow="0"');
+    expect(markup).toContain('aria-valuenow="1"');
+    expect(markup).toContain('width:0%');
+    expect(markup).toContain('width:1%');
+    expect(markup).not.toContain('width:100%');
+    expect(markup).not.toContain('width:99%');
   });
 
   test('distinguishes unknown and exhausted quotas', () => {
@@ -99,17 +101,20 @@ describe('Muse quota UI integration', () => {
     const markup = renderToStaticMarkup(createElement(MetaQuotaBody, { quota, classes }));
     expect(markup).toContain(i18n.t('meta_quota.unknown'));
     expect(markup.match(/role="meter"/g)).toHaveLength(1);
-    expect(markup).toContain('aria-valuenow="0"');
+    expect(markup).toContain('aria-valuenow="100"');
+    expect(markup).toContain('width:100%');
   });
 
-  test('renders the key endpoint response as 98% window and 100% weekly remaining', () => {
+  test('renders the key endpoint response as 2% window and 0% weekly used', () => {
     const data = parseMetaQuotaPayload(metaQuotaResponse)!;
     const markup = renderToStaticMarkup(
       createElement(MetaQuotaBody, { quota: META_CONFIG.buildSuccessState(data), classes })
     );
     expect(markup).toContain('Muse Code Everyday Usage');
-    expect(markup).toContain('aria-valuenow="98"');
-    expect(markup).toContain('aria-valuenow="100"');
+    expect(markup).toContain('aria-valuenow="2"');
+    expect(markup).toContain('aria-valuenow="0"');
+    expect(markup).toContain('width:2%');
+    expect(markup).toContain('width:0%');
     expect(markup).not.toContain(i18n.t('meta_quota.empty_data'));
     expect(markup).not.toContain('fixture@example.invalid');
     expect(markup).not.toContain('LLM|');

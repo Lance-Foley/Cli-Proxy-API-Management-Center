@@ -13,7 +13,6 @@ import {
   isThemeSurfaceIconProvider,
 } from '@/features/authFiles/constants';
 import type { ProviderSummary } from '../quotaSummary';
-import { QUOTA_PROGRESS_HIGH_THRESHOLD, QUOTA_PROGRESS_MEDIUM_THRESHOLD } from './QuotaMeter';
 import styles from './QuotaSummary.module.scss';
 
 export type QuotaSummaryProps = {
@@ -21,13 +20,6 @@ export type QuotaSummaryProps = {
   resolvedTheme: ResolvedTheme;
   nowMs: number;
   onSelect: (provider: ProviderSummary['provider']) => void;
-};
-
-const segmentTone = (remaining: number | null) => {
-  if (remaining === null) return styles.segmentUnknown;
-  if (remaining >= QUOTA_PROGRESS_HIGH_THRESHOLD) return styles.segmentHigh;
-  if (remaining >= QUOTA_PROGRESS_MEDIUM_THRESHOLD) return styles.segmentMedium;
-  return styles.segmentLow;
 };
 
 export function QuotaSummary({ summaries, resolvedTheme, nowMs, onSelect }: QuotaSummaryProps) {
@@ -40,6 +32,11 @@ export function QuotaSummary({ summaries, resolvedTheme, nowMs, onSelect }: Quot
         const { provider } = summary;
         const iconSrc = getAuthFileIcon(provider, resolvedTheme);
         const typeLabel = getTypeLabel(t, provider);
+        const known = summary.segments.filter((value): value is number => value !== null);
+        const usedTotal =
+          known.length === 0
+            ? null
+            : Math.round(known.reduce((sum, remaining) => sum + (100 - remaining), 0));
         const reset =
           summary.nextResetMs === null
             ? null
@@ -78,23 +75,25 @@ export function QuotaSummary({ summaries, resolvedTheme, nowMs, onSelect }: Quot
               {summary.label ?? t('quota_management.summary_no_data')}
             </span>
             <span className={styles.figure}>
-              <span className={styles.value}>
-                {summary.remainingTotal === null ? '--' : `${summary.remainingTotal}%`}
-              </span>
+              <span className={styles.value}>{usedTotal === null ? '--' : `${usedTotal}%`}</span>
               <span className={styles.of}>
                 {t('quota_management.summary_of', { total: summary.capacityTotal })}
               </span>
             </span>
 
             <span className={styles.segments} aria-hidden="true">
-              {summary.segments.map((remaining, index) => (
-                <span key={index} className={styles.segmentTrack}>
-                  <span
-                    className={`${styles.segmentFill} ${segmentTone(remaining)}`}
-                    style={{ width: `${Math.max(0, Math.min(100, remaining ?? 0))}%` }}
-                  />
-                </span>
-              ))}
+              {summary.segments.map((remaining, index) => {
+                const used =
+                  remaining === null ? null : Math.max(0, Math.min(100, 100 - remaining));
+                return (
+                  <span key={index} className={styles.segmentTrack}>
+                    <span
+                      className={`${styles.segmentFill} ${used === null ? styles.segmentUnknown : styles.segmentHigh}`}
+                      style={{ width: `${used ?? 0}%` }}
+                    />
+                  </span>
+                );
+              })}
             </span>
 
             <span className={styles.reset}>{reset ?? t('quota_management.summary_no_reset')}</span>

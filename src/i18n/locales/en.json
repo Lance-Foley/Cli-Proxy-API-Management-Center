@@ -545,8 +545,8 @@
     "plan_business_premium": "Business Premium"
   },
   "devin_quota": {
-    "daily": "Daily remaining",
-    "weekly": "Weekly remaining",
+    "daily": "Daily limit",
+    "weekly": "Weekly limit",
     "plan_label": "Plan",
     "plan_end": "Subscription ends",
     "unavailable": "Unavailable",

@@ -548,8 +548,8 @@
     "plan_business_premium": "Business Premium"
   },
   "devin_quota": {
-    "daily": "Остаток на день",
-    "weekly": "Остаток на неделю",
+    "daily": "Дневной лимит",
+    "weekly": "Недельный лимит",
     "plan_label": "Тариф",
     "plan_end": "Окончание подписки",
     "unavailable": "Нет данных",

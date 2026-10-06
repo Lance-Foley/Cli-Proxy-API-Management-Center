@@ -36,15 +36,17 @@ export function DevinQuotaBody({ quota, classes }: QuotaBodyProps<DevinQuotaStat
         const reset = buildResetDisplay(null, window.resetAtMs, now, locale);
         const soon = window.id === urgentRow;
         const label = t(`devin_quota.${window.id}`);
+        const used =
+          window.remainingPercent === null
+            ? null
+            : Math.max(0, Math.min(100, Math.round(100 - window.remainingPercent)));
         return (
           <div key={window.id} className={classes.quotaRow}>
             <div className={classes.quotaRowHeader}>
               <span className={classes.quotaModel}>{label}</span>
               <div className={classes.quotaMeta}>
                 <span className={classes.quotaPercent}>
-                  {window.remainingPercent === null
-                    ? t('devin_quota.unavailable')
-                    : `${window.remainingPercent}%`}
+                  {used === null ? t('devin_quota.unavailable') : `${used}%`}
                 </span>
                 {reset ? (
                   <QuotaResetLabel display={reset} classes={classes} soon={soon} />
@@ -54,13 +56,13 @@ export function DevinQuotaBody({ quota, classes }: QuotaBodyProps<DevinQuotaStat
               </div>
             </div>
             <div
-              role={window.remainingPercent === null ? undefined : 'meter'}
-              aria-label={window.remainingPercent === null ? undefined : label}
-              aria-valuemin={window.remainingPercent === null ? undefined : 0}
-              aria-valuemax={window.remainingPercent === null ? undefined : 100}
-              aria-valuenow={window.remainingPercent ?? undefined}
+              role={used === null ? undefined : 'meter'}
+              aria-label={used === null ? undefined : label}
+              aria-valuemin={used === null ? undefined : 0}
+              aria-valuemax={used === null ? undefined : 100}
+              aria-valuenow={used ?? undefined}
             >
-              <QuotaMeter percent={window.remainingPercent} classes={classes} index={index} />
+              <QuotaMeter percent={used} classes={classes} index={index} />
             </div>
           </div>
         );
