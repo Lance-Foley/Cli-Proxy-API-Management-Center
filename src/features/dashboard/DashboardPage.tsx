@@ -114,11 +114,10 @@ export function DashboardPage() {
     () => readQuotaUiState()?.showEmails ?? false
   );
   const toggleEmails = useCallback(() => {
-    setShowEmails((previous) => {
-      writeQuotaUiState({ showEmails: !previous });
-      return !previous;
-    });
-  }, []);
+    const next = !showEmails;
+    setShowEmails(next);
+    writeQuotaUiState({ showEmails: next });
+  }, [showEmails]);
 
   const windowLabel = useMemo(() => {
     if (traffic.windowMinutes <= 0) return DASH;
@@ -205,6 +204,15 @@ export function DashboardPage() {
 
   // Until the first credential read lands, "0 of 0" would be a claim, not a fact.
   const accountsLoaded = connected && authFiles !== null;
+  // Same states as the visible line, without the clock, so it only changes on a transition.
+  const liveAnnouncement = !liveStatus
+    ? ''
+    : liveStatus.tone === 'warning'
+      ? t('dashboard.status_poll_failed_initial', { seconds: pollSeconds })
+      : liveStatus.tone === 'paused'
+        ? t('dashboard.status_paused')
+        : t('dashboard.status_live', { seconds: pollSeconds });
+
   const activeTotal = views.length;
   const activeCount = filterCounts.live;
   const activeTone: MeterTone =
@@ -350,13 +358,16 @@ export function DashboardPage() {
                     ? styles.liveStatusPaused
                     : ''
               }`}
-              role="status"
               data-reveal
             >
               <i className={styles.liveStatusDot} aria-hidden="true" />
               {liveStatus.text}
             </p>
           )}
+          {/* Announce state changes only; the visible line ticks every poll. */}
+          <span className={styles.srOnly} role="status">
+            {liveAnnouncement}
+          </span>
           <div className={styles.heroActions} data-reveal>
             <Link to="/ai-providers" className={styles.primaryAction}>
               {t('dashboard.cta_manage_providers')}

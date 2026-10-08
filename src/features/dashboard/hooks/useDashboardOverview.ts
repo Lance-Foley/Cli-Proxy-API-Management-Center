@@ -189,9 +189,11 @@ export function useDashboardOverview() {
   const pageVisible = usePageVisible();
   const resolveApiKeysForModels = useApiKeysForModels();
 
-  const { usageByProvider, refreshRecentRequests } = useProviderRecentRequests({
-    enabled: connected,
-  });
+  const {
+    usageByProvider,
+    fetchedAtMs: usageFetchedAtMs,
+    refreshRecentRequests,
+  } = useProviderRecentRequests({ enabled: connected });
 
   const [snapshot, setSnapshot] = useState<CredentialSnapshot | null>(null);
   const [lastUpdatedAtMs, setLastUpdatedAtMs] = useState<number | null>(null);
@@ -230,15 +232,31 @@ export function useDashboardOverview() {
     }
   }, [connected, apiBase, resolveApiKeysForModels, fetchModelsFromStore]);
 
+  // Separate effects: a config refresh changes loadModels' identity, and sharing
+  // one effect would let its cleanup cancel an in-flight credential read.
   useEffect(() => {
     if (!connected) return;
     void fetchConfig().catch(() => undefined);
-    void loadAuthFiles();
+  }, [connected, fetchConfig]);
+
+  useEffect(() => {
+    if (!connected) return;
     void loadModels();
+  }, [connected, loadModels]);
+
+  useEffect(() => {
+    if (!connected) return;
+    void loadAuthFiles();
     return () => {
       listRequestRef.current += 1;
     };
-  }, [connected, fetchConfig, loadAuthFiles, loadModels]);
+  }, [connected, loadAuthFiles]);
+
+  // The shared usage cache can be minutes old; activity wants a fresh read on arrival.
+  useEffect(() => {
+    if (!connected) return;
+    void refreshRecentRequests().catch(() => undefined);
+  }, [connected, refreshRecentRequests]);
 
   const livePoll = useCallback(() => {
     void loadAuthFiles();
@@ -292,13 +310,14 @@ export function useDashboardOverview() {
   }, [fileSources, snapshot, scopeId]);
 
   useEffect(() => {
-    if (!connected) return;
+    // Stamp with the fetch time, not "now": cached usage can be minutes old.
+    if (!connected || usageFetchedAtMs <= 0) return;
     const scope = activityLedgersFor(scopeId);
     scope.apiKeys = advanceActivity(scope.apiKeys, activitySamples(apiKeySources), {
-      receivedAtMs: Date.now(),
+      receivedAtMs: usageFetchedAtMs,
     });
     setApiKeyLedger(scope.apiKeys);
-  }, [apiKeySources, connected, scopeId]);
+  }, [apiKeySources, connected, scopeId, usageFetchedAtMs]);
 
   const activity = useMemo(
     () => new Map<string, ActivityRecord>([...fileLedger, ...apiKeyLedger]),

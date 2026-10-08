@@ -7,12 +7,14 @@
  *
  * - `recent_requests`: ten-minute buckets aligned to the Unix clock, the last
  *   one still filling. A non-empty bucket only bounds when a request finished.
- * - lifetime `success` + `failed`: when the sum grows between two polls, a
- *   request finished between those polls.
+ * - lifetime `success` + `failed`: when the sum grows between two samples, a
+ *   request finished between those samples.
  *
- * Buckets seed the first reading with the middle of the newest busy bucket;
- * counter growth replaces it with the poll time from then on. An unchanged
- * counter never moves the reading forward — nothing new happened.
+ * Buckets seed the first reading with the middle of the newest busy bucket.
+ * Counter growth between two close samples pins the reading to the later one;
+ * growth across a long gap (a hidden tab, failed polls, another route) only
+ * narrows the estimate to where that gap overlaps the newest busy bucket. An
+ * unchanged counter never moves the reading forward — nothing new happened.
  *
  * Pure: no React, no clock of its own.
  */
@@ -21,6 +23,8 @@ import type { RecentRequestBucket } from '@/utils/recentRequests';
 
 export const ACTIVE_WINDOW_MS = 10 * 60_000;
 export const ACTIVITY_BUCKET_MS = 10 * 60_000;
+/** Samples closer than this (2.5 polls) pin new activity to the later one. */
+export const EXACT_SAMPLE_GAP_MS = 75_000;
 
 export interface ActivitySample {
   key: string;
@@ -34,50 +38,84 @@ export interface ActivityRecord {
   total: number;
   /** Local clock. Null when no request is visible in the bucket window. */
   lastActiveAtMs: number | null;
-  /** True once counter growth was seen; false while it is a bucket estimate. */
+  /** True when pinned by close samples; false while it is an estimate. */
   exact: boolean;
+  /** Local clock of the sample this record last absorbed. */
+  sampledAtMs: number;
 }
 
 export type ActivityLedger = ReadonlyMap<string, ActivityRecord>;
 
 export interface ActivityClock {
-  /** Local time the response arrived. */
+  /** Local time the data was fetched. */
   receivedAtMs: number;
   /** Server time of the snapshot. Missing means the local receipt time. */
   observedAtMs?: number | null;
 }
 
+interface Span {
+  startMs: number;
+  endMs: number;
+}
+
 const bucketTotal = (bucket: RecentRequestBucket): number => bucket.success + bucket.failed;
+const midpoint = ({ startMs, endMs }: Span): number => startMs + (endMs - startMs) / 2;
 
 /**
- * Midpoint of the newest non-empty bucket, on the local clock.
+ * The newest non-empty bucket, on the local clock.
  *
  * The current bucket ends at the snapshot instant, not ten minutes after it
- * started, so its midpoint never lands in the future. Server time is only used
- * for bucket alignment; the result is shifted onto the local clock through the
- * receipt time so a skewed server clock cannot age or rejuvenate it.
+ * started. Server time is only used for bucket alignment; the span is shifted
+ * onto the local clock through the receipt time so a skewed server clock
+ * cannot age or rejuvenate it.
  */
-export function estimateLastActivityMs(
+export function newestBusyBucket(
   buckets: readonly RecentRequestBucket[],
   clock: ActivityClock
-): number | null {
+): Span | null {
   const observedAtMs = clock.observedAtMs ?? clock.receivedAtMs;
   const currentStartMs = Math.floor(observedAtMs / ACTIVITY_BUCKET_MS) * ACTIVITY_BUCKET_MS;
+  const toLocal = (serverMs: number) => clock.receivedAtMs - (observedAtMs - serverMs);
 
   for (let index = buckets.length - 1; index >= 0; index -= 1) {
     if (bucketTotal(buckets[index]) <= 0) continue;
     const bucketsAgo = buckets.length - 1 - index;
     const startMs = currentStartMs - bucketsAgo * ACTIVITY_BUCKET_MS;
     const endMs = Math.min(startMs + ACTIVITY_BUCKET_MS, observedAtMs);
-    const midpointMs = startMs + (endMs - startMs) / 2;
-    return clock.receivedAtMs - (observedAtMs - midpointMs);
+    return { startMs: toLocal(startMs), endMs: toLocal(endMs) };
   }
   return null;
 }
 
+/** Midpoint of the newest busy bucket, or null for a quiet window. */
+export function estimateLastActivityMs(
+  buckets: readonly RecentRequestBucket[],
+  clock: ActivityClock
+): number | null {
+  const bucket = newestBusyBucket(buckets, clock);
+  return bucket ? midpoint(bucket) : null;
+}
+
+/** Where a request that finished after `sinceMs` most likely finished. */
+function locateGrowth(
+  sample: ActivitySample,
+  sinceMs: number,
+  clock: ActivityClock
+): Pick<ActivityRecord, 'lastActiveAtMs' | 'exact'> {
+  const bucket = newestBusyBucket(sample.buckets, clock);
+  const endMs = Math.min(clock.receivedAtMs, bucket?.endMs ?? clock.receivedAtMs);
+
+  if (clock.receivedAtMs - sinceMs <= EXACT_SAMPLE_GAP_MS) {
+    return { lastActiveAtMs: endMs, exact: true };
+  }
+  // A long gap: the request finished somewhere in it, inside the newest busy bucket.
+  const startMs = Math.min(endMs, Math.max(sinceMs, bucket?.startMs ?? sinceMs));
+  return { lastActiveAtMs: midpoint({ startMs, endMs }), exact: false };
+}
+
 /**
- * Fold one poll into the ledger. Accounts missing from `samples` are dropped:
- * a deleted credential must not keep counting as active.
+ * Fold one sample set into the ledger. Accounts missing from `samples` are
+ * dropped: a deleted credential must not keep counting as active.
  */
 export function advanceActivity(
   previous: ActivityLedger,
@@ -85,21 +123,22 @@ export function advanceActivity(
   clock: ActivityClock
 ): Map<string, ActivityRecord> {
   const next = new Map<string, ActivityRecord>();
+  const sampledAtMs = clock.receivedAtMs;
 
   samples.forEach((sample) => {
     const prior = previous.get(sample.key);
     if (prior && sample.total > prior.total) {
       next.set(sample.key, {
         total: sample.total,
-        lastActiveAtMs: clock.receivedAtMs,
-        exact: true,
+        ...locateGrowth(sample, prior.sampledAtMs, clock),
+        sampledAtMs,
       });
       return;
     }
     // An unchanged counter keeps its reading — unless that reading is "never seen",
     // which visible bucket activity contradicts (a restart that landed on the same total).
     if (prior && sample.total === prior.total && prior.lastActiveAtMs !== null) {
-      next.set(sample.key, { ...prior });
+      next.set(sample.key, { ...prior, sampledAtMs });
       return;
     }
     // First sighting, or the counters went backwards because the proxy restarted.
@@ -107,6 +146,7 @@ export function advanceActivity(
       total: sample.total,
       lastActiveAtMs: estimateLastActivityMs(sample.buckets, clock),
       exact: false,
+      sampledAtMs,
     });
   });
 

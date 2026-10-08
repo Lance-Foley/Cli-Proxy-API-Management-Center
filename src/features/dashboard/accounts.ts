@@ -136,6 +136,18 @@ export function accountSourcesFromFiles(
     });
 }
 
+/** Host of the key's base URL, so one key on two upstreams reads as two rows. */
+const baseUrlHost = (compositeKey: string): string => {
+  const separatorIndex = compositeKey.indexOf('|');
+  const baseUrl = (separatorIndex < 0 ? '' : compositeKey.slice(0, separatorIndex)).trim();
+  if (!baseUrl) return '';
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+};
+
 export function accountSourcesFromApiKeyUsage(
   usage: ApiKeyUsageByProvider,
   maskKey: (apiKey: string) => string
@@ -147,7 +159,9 @@ export function accountSourcesFromApiKeyUsage(
         key: `api:${provider}\0${compositeKey}`,
         kind: 'apiKey',
         provider,
-        label: maskKey(apiKeyFromCompositeKey(compositeKey)),
+        label: [maskKey(apiKeyFromCompositeKey(compositeKey)), baseUrlHost(compositeKey)]
+          .filter(Boolean)
+          .join(' · '),
         file: null,
         quotaType: null,
         lifetimeTotal: entry.success + entry.failed,

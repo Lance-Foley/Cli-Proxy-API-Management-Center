@@ -13,6 +13,7 @@ import {
   isThemeSurfaceIconProvider,
 } from '@/features/authFiles/constants';
 import type { ProviderSummary } from '../quotaSummary';
+import { rosterWindowTitle } from '../rosterModel';
 import styles from './QuotaSummary.module.scss';
 
 export type QuotaSummaryProps = {
@@ -72,7 +73,9 @@ export function QuotaSummary({ summaries, resolvedTheme, nowMs, onSelect }: Quot
             </span>
 
             <span className={styles.label}>
-              {summary.label ?? t('quota_management.summary_no_data')}
+              {summary.label
+                ? rosterWindowTitle(t, summary.label)
+                : t('quota_management.summary_no_data')}
             </span>
             <span className={styles.figure}>
               <span className={styles.value}>{usedTotal === null ? '--' : `${usedTotal}%`}</span>

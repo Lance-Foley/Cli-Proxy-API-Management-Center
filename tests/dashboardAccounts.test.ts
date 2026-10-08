@@ -51,11 +51,11 @@ const claudeQuota = (usedPercents: number[]): QuotaCardState =>
 
 const live = (key: string): [string, ActivityRecord] => [
   key,
-  { total: 1, lastActiveAtMs: NOW - 2 * MINUTE, exact: true },
+  { total: 1, lastActiveAtMs: NOW - 2 * MINUTE, exact: true, sampledAtMs: NOW },
 ];
 const stale = (key: string, agoMs: number): [string, ActivityRecord] => [
   key,
-  { total: 1, lastActiveAtMs: NOW - agoMs, exact: true },
+  { total: 1, lastActiveAtMs: NOW - agoMs, exact: true, sampledAtMs: NOW },
 ];
 
 const noQuota = () => undefined;
@@ -99,7 +99,7 @@ describe('account sources', () => {
       ],
     ]);
     const [source] = accountSourcesFromApiKeyUsage(usage, () => 'sk********ef');
-    expect(source.label).toBe('sk********ef');
+    expect(source.label).toBe('sk********ef · api.example');
     expect(source.key).not.toContain('sk********ef');
     expect(source.quotaType).toBe(null);
     expect(JSON.stringify({ label: source.label, provider: source.provider })).not.toContain(

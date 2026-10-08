@@ -57,7 +57,7 @@ export function useAccountQuota(files: AuthFileItem[] | null, enabled: boolean, 
 
   useEffect(() => {
     if (!enabled || !autoLoad || batchLoading) return;
-    const due = staleQuotaEntries(entries, useQuotaStore.getState().loadedAtByKey, Date.now());
+    const due = staleQuotaEntries(entries, useQuotaStore.getState().fetchedAtByKey, Date.now());
     if (due.length > 0) void loadQuota(due);
   }, [autoLoad, batchLoading, enabled, entries, loadQuota]);
 

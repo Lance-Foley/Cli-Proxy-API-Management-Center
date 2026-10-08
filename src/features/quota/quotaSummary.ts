@@ -62,9 +62,10 @@ export function buildProviderSummaries(
 
       known += 1;
       remainingTotal += lane.remaining;
-      const matching = lane.limits.find((limit) => limit.remaining === lane.remaining);
-      const label = matching?.label || lane.limits[0]?.label;
-      if (label) labelVotes.set(label, (labelVotes.get(label) ?? 0) + 1);
+      // Name the window that was counted. Matching on an equal percentage picked
+      // whichever window happened to share the number (xAI read "GrokBuild" for
+      // its weekly total; Claude could read "5-hour limit" for the 7-day one).
+      if (lane.label) labelVotes.set(lane.label, (labelVotes.get(lane.label) ?? 0) + 1);
       if (lane.anchorMs !== null && lane.anchorMs > nowMs) {
         nextResetMs = nextResetMs === null ? lane.anchorMs : Math.min(nextResetMs, lane.anchorMs);
       }

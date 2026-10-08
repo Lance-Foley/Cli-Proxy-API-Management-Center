@@ -16,6 +16,9 @@ export type QuotaTabId = 'all' | QuotaProviderType;
 /** Ledger and card pages show 20 accounts. Refresh all quota is not limited to this page. */
 export const QUOTA_PAGE_SIZE = 20;
 
+/** Upstream quota requests in flight per provider. Keeps a large roster off rate limits. */
+export const QUOTA_FETCH_CONCURRENCY = 4;
+
 /** Quota page timer. Hidden or disconnected pages pass null to useInterval instead. */
 export const QUOTA_AUTO_REFRESH_MS = 5 * 60 * 1000;
 

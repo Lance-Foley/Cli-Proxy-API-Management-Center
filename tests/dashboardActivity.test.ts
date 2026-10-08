@@ -66,6 +66,14 @@ describe('estimateLastActivityMs', () => {
 
 describe('advanceActivity', () => {
   const clock = { receivedAtMs: NOW, observedAtMs: NOW };
+  const at = (ms: number) => ({ receivedAtMs: ms, observedAtMs: ms });
+  const record = (overrides: Partial<ActivityRecord>): ActivityRecord => ({
+    total: 1,
+    lastActiveAtMs: null,
+    exact: false,
+    sampledAtMs: NOW,
+    ...overrides,
+  });
 
   test('first sighting seeds an estimate from buckets', () => {
     const ledger = advanceActivity(
@@ -77,54 +85,107 @@ describe('advanceActivity', () => {
       total: 10,
       lastActiveAtMs: BUCKET_START + 1.5 * MINUTE,
       exact: false,
+      sampledAtMs: NOW,
     });
   });
 
-  test('counter growth pins activity to the poll that saw it', () => {
+  test('growth between two close polls pins activity to the later one', () => {
     const first = advanceActivity(
       new Map(),
       [{ key: 'a', total: 10, buckets: window([4]) }],
       clock
     );
     const later = NOW + 30_000;
-    const second = advanceActivity(first, [{ key: 'a', total: 12, buckets: window([0, 4]) }], {
-      receivedAtMs: later,
-      observedAtMs: later,
+    const second = advanceActivity(
+      first,
+      [{ key: 'a', total: 12, buckets: window([0, 4]) }],
+      at(later)
+    );
+    expect(second.get('a')).toEqual({
+      total: 12,
+      lastActiveAtMs: later,
+      exact: true,
+      sampledAtMs: later,
     });
-    expect(second.get('a')).toEqual({ total: 12, lastActiveAtMs: later, exact: true });
   });
 
-  test('an unchanged counter never moves the reading forward', () => {
-    const seen = NOW - 2 * MINUTE;
-    const prior = new Map<string, ActivityRecord>([
-      ['a', { total: 12, lastActiveAtMs: seen, exact: true }],
+  test('close polls straddling a bucket boundary pin activity to the boundary', () => {
+    // Sampled at 10:19:50; at 10:20:10 the growth sits in the bucket that closed at 10:20.
+    const before = BUCKET_START + 9 * MINUTE + 50_000;
+    const after = BUCKET_START + 10 * MINUTE + 10_000;
+    const prior = new Map([['a', record({ total: 4, lastActiveAtMs: NOW, sampledAtMs: before })]]);
+    const next = advanceActivity(prior, [{ key: 'a', total: 5, buckets: window([1]) }], at(after));
+    expect(next.get('a')).toMatchObject({
+      lastActiveAtMs: BUCKET_START + ACTIVITY_BUCKET_MS,
+      exact: true,
+    });
+  });
+
+  test('growth across a long gap is not "just now"', () => {
+    // Regression: hidden for two hours, the last request ~110 minutes ago, and the
+    // account read "Live · just now" because growth was stamped with this poll.
+    const hiddenAt = NOW - 120 * MINUTE;
+    const prior = new Map([
+      [
+        'a',
+        record({
+          total: 40,
+          lastActiveAtMs: hiddenAt - MINUTE,
+          exact: true,
+          sampledAtMs: hiddenAt,
+        }),
+      ],
     ]);
+    // Busy bucket 11 back from the current one: [BUCKET_START - 110m, BUCKET_START - 100m).
+    const next = advanceActivity(prior, [{ key: 'a', total: 46, buckets: window([11]) }], clock);
+    const reading = next.get('a')!;
+    expect(reading.exact).toBe(false);
+    expect(reading.lastActiveAtMs).toBe(BUCKET_START - 105 * MINUTE);
+    expect(isActiveAt(reading, NOW)).toBe(false);
+  });
+
+  test('a long gap never places activity before the previous sample', () => {
+    // Sampled 2 minutes into the busy bucket [-20m, -10m), then away for 18 minutes.
+    const sampledAtMs = BUCKET_START - 18 * MINUTE;
+    const prior = new Map([['a', record({ total: 2, lastActiveAtMs: null, sampledAtMs })]]);
+    const next = advanceActivity(prior, [{ key: 'a', total: 3, buckets: window([2]) }], clock);
+    const bucketEnd = BUCKET_START - ACTIVITY_BUCKET_MS;
+    expect(next.get('a')).toMatchObject({
+      lastActiveAtMs: sampledAtMs + (bucketEnd - sampledAtMs) / 2,
+      exact: false,
+    });
+  });
+
+  test('an unchanged counter never moves the reading forward but records the sample', () => {
+    const seen = NOW - 2 * MINUTE;
+    const prior = new Map([['a', record({ total: 12, lastActiveAtMs: seen, exact: true })]]);
     // Six minutes later the current bucket midpoint would be newer than `seen`.
     const later = NOW + 6 * MINUTE;
-    const next = advanceActivity(prior, [{ key: 'a', total: 12, buckets: window([0]) }], {
-      receivedAtMs: later,
-      observedAtMs: later,
+    const next = advanceActivity(prior, [{ key: 'a', total: 12, buckets: window([0]) }], at(later));
+    expect(next.get('a')).toEqual({
+      total: 12,
+      lastActiveAtMs: seen,
+      exact: true,
+      sampledAtMs: later,
     });
-    expect(next.get('a')).toEqual({ total: 12, lastActiveAtMs: seen, exact: true });
   });
 
   test('a counter reset re-seeds from buckets', () => {
-    const prior = new Map<string, ActivityRecord>([
-      ['a', { total: 900, lastActiveAtMs: NOW - MINUTE, exact: true }],
+    const prior = new Map([
+      ['a', record({ total: 900, lastActiveAtMs: NOW - MINUTE, exact: true })],
     ]);
     const next = advanceActivity(prior, [{ key: 'a', total: 3, buckets: window([1]) }], clock);
     expect(next.get('a')).toEqual({
       total: 3,
       lastActiveAtMs: BUCKET_START - ACTIVITY_BUCKET_MS / 2,
       exact: false,
+      sampledAtMs: NOW,
     });
   });
 
   test('a "never seen" reading yields to visible activity even if the total matches', () => {
     // A restart that happens to land on the old total must not hide real traffic.
-    const prior = new Map<string, ActivityRecord>([
-      ['a', { total: 527, lastActiveAtMs: null, exact: false }],
-    ]);
+    const prior = new Map([['a', record({ total: 527 })]]);
     const next = advanceActivity(prior, [{ key: 'a', total: 527, buckets: window([2]) }], clock);
     expect(next.get('a')?.lastActiveAtMs).toBe(
       BUCKET_START - 2 * ACTIVITY_BUCKET_MS + ACTIVITY_BUCKET_MS / 2
@@ -132,48 +193,54 @@ describe('advanceActivity', () => {
   });
 
   test('a quiet account stays "never seen" across polls', () => {
-    const prior = new Map<string, ActivityRecord>([
-      ['a', { total: 5, lastActiveAtMs: null, exact: false }],
-    ]);
+    const prior = new Map([['a', record({ total: 5, sampledAtMs: NOW - MINUTE })]]);
     const next = advanceActivity(prior, [{ key: 'a', total: 5, buckets: window([]) }], clock);
-    expect(next.get('a')).toEqual({ total: 5, lastActiveAtMs: null, exact: false });
+    expect(next.get('a')).toEqual(record({ total: 5 }));
   });
 
   test('removed accounts leave the ledger', () => {
-    const prior = new Map<string, ActivityRecord>([
-      ['gone', { total: 1, lastActiveAtMs: NOW, exact: true }],
-    ]);
+    const prior = new Map([['gone', record({ lastActiveAtMs: NOW, exact: true })]]);
     const next = advanceActivity(prior, [{ key: 'kept', total: 0, buckets: [] }], clock);
     expect([...next.keys()]).toEqual(['kept']);
   });
 
   test('does not mutate the previous ledger', () => {
-    const record: ActivityRecord = { total: 1, lastActiveAtMs: NOW - MINUTE, exact: true };
-    const prior = new Map([['a', record]]);
+    const original = record({
+      lastActiveAtMs: NOW - MINUTE,
+      exact: true,
+      sampledAtMs: NOW - MINUTE,
+    });
+    const prior = new Map([['a', original]]);
     advanceActivity(prior, [{ key: 'a', total: 5, buckets: [] }], clock);
-    expect(prior.get('a')).toBe(record);
-    expect(record.total).toBe(1);
+    expect(prior.get('a')).toBe(original);
+    expect(original.total).toBe(1);
   });
 });
 
 describe('isActiveAt / countActive', () => {
+  const record = (lastActiveAtMs: number | null): ActivityRecord => ({
+    total: 1,
+    lastActiveAtMs,
+    exact: true,
+    sampledAtMs: NOW,
+  });
+
   test('active means a request finished within the last ten minutes', () => {
-    const record: ActivityRecord = { total: 1, lastActiveAtMs: NOW, exact: true };
-    expect(isActiveAt(record, NOW)).toBe(true);
-    expect(isActiveAt(record, NOW + ACTIVE_WINDOW_MS)).toBe(true);
-    expect(isActiveAt(record, NOW + ACTIVE_WINDOW_MS + 1)).toBe(false);
+    expect(isActiveAt(record(NOW), NOW)).toBe(true);
+    expect(isActiveAt(record(NOW), NOW + ACTIVE_WINDOW_MS)).toBe(true);
+    expect(isActiveAt(record(NOW), NOW + ACTIVE_WINDOW_MS + 1)).toBe(false);
   });
 
   test('accounts with no visible request are never active', () => {
-    expect(isActiveAt({ total: 0, lastActiveAtMs: null, exact: false }, NOW)).toBe(false);
+    expect(isActiveAt(record(null), NOW)).toBe(false);
     expect(isActiveAt(undefined, NOW)).toBe(false);
   });
 
   test('counts only the active records', () => {
-    const ledger = new Map<string, ActivityRecord>([
-      ['live', { total: 5, lastActiveAtMs: NOW - MINUTE, exact: true }],
-      ['stale', { total: 5, lastActiveAtMs: NOW - 11 * MINUTE, exact: true }],
-      ['never', { total: 0, lastActiveAtMs: null, exact: false }],
+    const ledger = new Map([
+      ['live', record(NOW - MINUTE)],
+      ['stale', record(NOW - 11 * MINUTE)],
+      ['never', record(null)],
     ]);
     expect(countActive(ledger, NOW)).toBe(1);
   });

@@ -13,7 +13,8 @@ import { useTranslation } from 'react-i18next';
 import { captureQuotaCacheGeneration, commitIfQuotaCacheCurrent, useQuotaStore } from '@/stores';
 import { getStatusFromError } from '@/utils/quota';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
-import type { QuotaFileEntry } from '../logic';
+import { QUOTA_FETCH_CONCURRENCY } from '../constants';
+import { mapWithConcurrency, type QuotaFileEntry } from '../logic';
 import { QUOTA_ADAPTERS, getQuotaSetter, type QuotaCardState } from '../providers';
 import { enrichQuotaInBackground } from '../quotaEnrichment';
 import type { QuotaProviderType } from '../providers/types';
@@ -56,17 +57,26 @@ export function useQuotaBatchLoader() {
             const setQuota = getQuotaSetter(adapter);
 
             commitIfQuotaCacheCurrent(cacheGeneration, () => {
+              useQuotaStore.getState().markQuotaFetched(
+                entries.map(({ file }) => getQuotaCacheKey(file)),
+                Date.now()
+              );
+              // A background refresh keeps the last good numbers on screen; only
+              // accounts with nothing to show yet switch to the loading state.
               setQuota((prev) => {
                 const nextState = { ...prev };
                 entries.forEach(({ file }) => {
-                  nextState[getQuotaCacheKey(file)] = adapter.buildLoadingState();
+                  const key = getQuotaCacheKey(file);
+                  if (prev[key]?.status !== 'success') nextState[key] = adapter.buildLoadingState();
                 });
                 return nextState;
               });
             });
 
-            const results = await Promise.all(
-              entries.map(async ({ file }): Promise<BatchFetchResult> => {
+            const results = await mapWithConcurrency(
+              entries,
+              QUOTA_FETCH_CONCURRENCY,
+              async ({ file }): Promise<BatchFetchResult> => {
                 const cacheKey = getQuotaCacheKey(file);
                 try {
                   const data = await adapter.fetchQuota(file, t);
@@ -81,7 +91,7 @@ export function useQuotaBatchLoader() {
                     errorStatus: getStatusFromError(err),
                   };
                 }
-              })
+              }
             );
 
             if (requestId !== requestIdRef.current) return;
@@ -107,7 +117,7 @@ export function useQuotaBatchLoader() {
               });
               return nextState;
             });
-            useQuotaStore.getState().markQuotaLoaded([...committedStates.keys()], Date.now());
+            useQuotaStore.getState().markQuotaFetched([...committedStates.keys()], Date.now());
             results.forEach((result, index) => {
               const state = committedStates.get(result.cacheKey);
               if (result.status === 'success' && state) {

@@ -56,6 +56,19 @@ export interface TimelineLane {
   periodHours: number | null;
   /** Remaining percent reported for the window ending at `anchorMs`. */
   remaining: number | null;
+  /**
+   * Name of the drawn window — display text, or an i18n key for providers that
+   * store keys. Whatever summarizes `remaining` must use this name, never one
+   * inferred from a matching percentage.
+   */
+  label: string | null;
+  /**
+   * Name of the drawn window when it is not the account-wide one (for example
+   * Claude's 7-day limit had no reset instant, so a Fable window anchors the
+   * lane). The bar must say so instead of passing off that window's number as
+   * the account's. Null for the account-wide window and for single-window providers.
+   */
+  scopeLabel: string | null;
   limits: TimelineLimit[];
   resetCredits: TimelineResetCredit[];
 }
@@ -351,6 +364,8 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     anchorMs: null,
     periodHours: null,
     remaining: null,
+    label: null,
+    scopeLabel: null,
     limits: [],
     resetCredits: [],
   };
@@ -404,6 +419,8 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       // Claude and Codex store percent USED.
       remaining:
         typeof chosen.usedPercent === 'number' ? clampPercent(100 - chosen.usedPercent) : null,
+      label: chosen.label || chosen.id || null,
+      scopeLabel: chosen.id === preferredId ? null : chosen.label || chosen.id || null,
       limits: windows
         .filter((window) => typeof window.usedPercent === 'number')
         .map((window) => ({
@@ -434,6 +451,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs,
       periodHours: chosen.periodHours,
       remaining: chosen.remainingPercent,
+      label: chosen.label ?? chosen.id,
       limits: windows
         .filter((window) => window.remainingPercent !== null)
         .map((window) => ({
@@ -462,6 +480,8 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       // length; weekly is what `periodType` already told us.
       periodHours: billing.periodHours ?? 24 * 7,
       remaining,
+      // The weekly total, not any one product inside it.
+      label: 'xai_quota.weekly_limit',
       // Per-product usage is the closest analogue to the other providers'
       // per-window breakdown.
       limits: (billing.productUsage ?? [])
@@ -494,6 +514,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs ?? null,
       periodHours: chosen.periodHours ?? null,
       remaining: remainingOf(chosen),
+      label: chosen.label ?? null,
       limits: buckets
         .map((bucket) => ({ label: bucket.label ?? '', remaining: remainingOf(bucket) }))
         .filter((limit): limit is TimelineLimit => limit.remaining !== null),
@@ -516,6 +537,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs ?? null,
       periodHours: chosen.periodHours ?? null,
       remaining: remainingOf(chosen),
+      label: chosen.label || chosen.labelKey || null,
       limits: rows
         .map((row) => ({ label: row.label ?? '', remaining: remainingOf(row) }))
         .filter((limit): limit is TimelineLimit => limit.remaining !== null),
@@ -556,6 +578,7 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
       anchorMs: chosen.resetAtMs,
       periodHours: chosen.periodHours,
       remaining: remainingOf(chosen),
+      label: `meta_quota.${chosen.id}`,
       limits: windows
         .map((window) => ({
           label: `meta_quota.${window.id}`,

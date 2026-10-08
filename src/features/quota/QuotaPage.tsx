@@ -2,7 +2,7 @@
  * 额度查询页：提供商 tabs + 统一卡网格。
  *
  * 保留的行为契约（重设计不改）：
- * - 到达时加载从未加载或超过 5 分钟的额度（与仪表盘共用 loadedAtByKey）；Devin 首次可见时主动查询一次。
+ * - 到达时加载从未加载或超过 5 分钟的额度（与仪表盘共用 fetchedAtByKey）；Devin 首次可见时主动查询一次。
  * - 页头「刷新全部额度」与 5 分钟定时器刷新每一个额度账号。隐藏标签页时暂停。
  * - cacheGeneration 会话隔离 + request-id 去重（见 useQuotaBatchLoader）；
  * - 文件列表变化后按 provider 剪枝额度缓存（已删文件不残留）；
@@ -292,6 +292,10 @@ export function QuotaPage() {
       QUOTA_TAB_ORDER.map((type) => [type, new Set<string>()])
     );
     entries.forEach((entry) => survivorsByType.get(entry.type)?.add(getQuotaCacheKey(entry.file)));
+    // A credential that disappears and comes back must read as never fetched.
+    useQuotaStore
+      .getState()
+      .pruneQuotaFetches(new Set(entries.map((entry) => getQuotaCacheKey(entry.file))));
 
     QUOTA_TAB_ORDER.forEach((type) => {
       const survivors = survivorsByType.get(type) ?? new Set<string>();
@@ -379,7 +383,7 @@ export function QuotaPage() {
     if (filesGeneration !== sessionGeneration) return;
     if (arrivalLoadSessionRef.current === sessionGeneration) return;
     arrivalLoadSessionRef.current = sessionGeneration;
-    const due = staleQuotaEntries(entries, useQuotaStore.getState().loadedAtByKey, Date.now());
+    const due = staleQuotaEntries(entries, useQuotaStore.getState().fetchedAtByKey, Date.now());
     if (due.length > 0) void loadQuota(due);
   }, [
     batchLoading,

@@ -121,3 +121,56 @@ describe('buildProviderSummaries headline', () => {
     expect(summary.remainingTotal).toBe(118); // 182% used of 300%
   });
 });
+
+describe('buildProviderSummaries names the counted window', () => {
+  test('xAI reads as its weekly total, not the first product', () => {
+    // Regression: the strip read "GrokBuild · 38%" — 38% is the weekly total;
+    // GrokBuild itself was 36%.
+    const xai = entry('xai-a.json', 'xai');
+    const quota = {
+      status: 'success',
+      billing: {
+        periodType: 'weekly',
+        usagePercent: 38,
+        resetAtMs: NOW + 100 * HOUR,
+        periodHours: 168,
+        productUsage: [
+          { product: 'GrokBuild', usagePercent: 36 },
+          { product: 'GrokAppBuilder', usagePercent: 2 },
+        ],
+      },
+    } as unknown as QuotaCardState;
+
+    const [summary] = buildProviderSummaries([xai], () => quota, NOW);
+
+    expect(summary.label).toBe('xai_quota.weekly_limit');
+    expect(summary.remainingTotal).toBe(62);
+  });
+
+  test('Claude names the 7-day limit even when the 5-hour shares its percent', () => {
+    const claude = entry('claude-a.json', 'claude');
+    const quota = {
+      status: 'success',
+      windows: [
+        {
+          id: 'five-hour',
+          label: '5-hour limit',
+          usedPercent: 36,
+          resetAtMs: NOW + HOUR,
+          periodHours: 5,
+        },
+        {
+          id: 'seven-day',
+          label: '7-day limit',
+          usedPercent: 36,
+          resetAtMs: NOW + 50 * HOUR,
+          periodHours: 168,
+        },
+      ],
+    } as unknown as QuotaCardState;
+
+    const [summary] = buildProviderSummaries([claude], () => quota, NOW);
+
+    expect(summary.label).toBe('7-day limit');
+  });
+});

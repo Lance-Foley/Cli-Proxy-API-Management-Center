@@ -40,6 +40,7 @@ export function useQuotaActions(disableControls: boolean) {
         ...prev,
         [cacheKey]: adapter.buildLoadingState(),
       }));
+      useQuotaStore.getState().markQuotaFetched([cacheKey], Date.now());
 
       try {
         const data = await adapter.fetchQuota(file, t);
@@ -49,7 +50,7 @@ export function useQuotaActions(disableControls: boolean) {
             ...prev,
             [cacheKey]: successState,
           }));
-          useQuotaStore.getState().markQuotaLoaded([cacheKey], Date.now());
+          useQuotaStore.getState().markQuotaFetched([cacheKey], Date.now());
           void enrichQuotaInBackground(adapter, file, data, successState, t);
           showNotification(t('auth_files.quota_refresh_success', { name: file.name }), 'success');
         });
@@ -61,7 +62,7 @@ export function useQuotaActions(disableControls: boolean) {
             ...prev,
             [cacheKey]: adapter.buildErrorState(message, status),
           }));
-          useQuotaStore.getState().markQuotaLoaded([cacheKey], Date.now());
+          useQuotaStore.getState().markQuotaFetched([cacheKey], Date.now());
           showNotification(
             t('auth_files.quota_refresh_failed', { name: file.name, message }),
             'error'

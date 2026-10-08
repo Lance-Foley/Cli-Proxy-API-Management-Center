@@ -154,7 +154,13 @@ export function AccountBoard(props: AccountBoardProps) {
           </button>
         </p>
       ) : (
-        <div className={styles.tableWrap}>
+        // Focusable so keyboard users can scroll the columns on narrow screens.
+        <div
+          className={styles.tableWrap}
+          role="region"
+          aria-label={t('dashboard.board_title')}
+          tabIndex={0}
+        >
           <table className={styles.table}>
             <caption className={styles.srOnly}>{t('dashboard.board_title')}</caption>
             <thead>
@@ -213,7 +219,11 @@ function AccountRow({ view, maskNames, resolvedTheme, nowMs, windowLabel }: Acco
   const plan = quota ? rosterPlanText(t, quota.plan) : null;
 
   const lastActive = (() => {
-    if (view.lastActiveAtMs === null) return t('dashboard.board_never', { window: windowLabel });
+    if (view.lastActiveAtMs === null) {
+      return windowLabel === DASH
+        ? t('dashboard.board_never_seen')
+        : t('dashboard.board_never', { window: windowLabel });
+    }
     const at = Math.min(view.lastActiveAtMs, nowMs);
     if (nowMs - at < JUST_NOW_MS) return t('dashboard.board_just_now');
     const relative = formatRelativeInstant(at, nowMs, locale);

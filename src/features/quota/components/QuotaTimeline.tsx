@@ -405,11 +405,11 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
                 key={window.startMs}
                 className={`${styles.window} ${styles[`window${capitalize(window.state)}`]}`}
                 style={{ left: `${window.leftPercent}%`, width: `${window.widthPercent}%` }}
-                title={`${lane.displayName}\n${formatDay(window.startMs)} ${formatTime(
+                title={`${lane.displayName}${lane.scopeLabel ? ` · ${lane.scopeLabel}` : ''}\n${formatDay(
                   window.startMs
-                )} → ${formatDay(window.endMs)} ${formatTime(window.endMs)}${
-                  used !== null ? `\n${used}% used` : ''
-                }`}
+                )} ${formatTime(window.startMs)} → ${formatDay(window.endMs)} ${formatTime(
+                  window.endMs
+                )}${used !== null ? `\n${used}% used` : ''}`}
               >
                 {/* Only the API-reported current window has meaningful usage;
                     projected windows intentionally have no fill. */}
@@ -418,6 +418,8 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
                 )}
                 {showLabel && (
                   <span className={styles.windowLabel}>
+                    {/* Name a stand-in window so its number is never read as the account's. */}
+                    {used !== null && lane.scopeLabel ? `${lane.scopeLabel} ` : ''}
                     {used !== null ? `${used}% · ` : ''}
                     {endText}
                   </span>
