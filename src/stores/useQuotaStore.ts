@@ -19,6 +19,8 @@ type QuotaUpdater<T> = T | ((prev: T) => T);
 interface QuotaStoreState {
   cacheGeneration: number;
   fileGenerations: Record<string, number>;
+  /** Cache key → when its quota last settled (success or error). Drives auto-refresh. */
+  loadedAtByKey: Record<string, number>;
   antigravityQuota: Record<string, AntigravityQuotaState>;
   claudeQuota: Record<string, ClaudeQuotaState>;
   codexQuota: Record<string, CodexQuotaState>;
@@ -33,6 +35,7 @@ interface QuotaStoreState {
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
   setMetaQuota: (updater: QuotaUpdater<Record<string, MetaQuotaState>>) => void;
   setXaiQuota: (updater: QuotaUpdater<Record<string, XaiQuotaState>>) => void;
+  markQuotaLoaded: (keys: string[], atMs: number) => void;
   clearQuotaCache: (names?: string[]) => void;
 }
 
@@ -46,6 +49,7 @@ const resolveUpdater = <T>(updater: QuotaUpdater<T>, prev: T): T => {
 export const useQuotaStore = create<QuotaStoreState>((set) => ({
   cacheGeneration: 0,
   fileGenerations: {},
+  loadedAtByKey: {},
   antigravityQuota: {},
   claudeQuota: {},
   codexQuota: {},
@@ -79,6 +83,15 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     set((state) => ({
       xaiQuota: resolveUpdater(updater, state.xaiQuota),
     })),
+  markQuotaLoaded: (keys, atMs) =>
+    set((state) => {
+      if (keys.length === 0) return state;
+      const loadedAtByKey = { ...state.loadedAtByKey };
+      keys.forEach((key) => {
+        loadedAtByKey[key] = atMs;
+      });
+      return { loadedAtByKey };
+    }),
   clearQuotaCache: (names) =>
     set((state) => {
       if (names) {
@@ -99,6 +112,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         };
         return {
           fileGenerations,
+          loadedAtByKey: omitNames(state.loadedAtByKey),
           antigravityQuota: omitNames(state.antigravityQuota),
           claudeQuota: omitNames(state.claudeQuota),
           codexQuota: omitNames(state.codexQuota),
@@ -111,6 +125,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
       return {
         cacheGeneration: state.cacheGeneration + 1,
         fileGenerations: {},
+        loadedAtByKey: {},
         antigravityQuota: {},
         claudeQuota: {},
         codexQuota: {},

@@ -4,6 +4,7 @@
  */
 
 import type { AuthFileItem } from '@/types';
+import { getQuotaCacheKey } from '@/utils/quota/identity';
 import { ANTIGRAVITY_CONFIG } from './providers/antigravity/data';
 import { CLAUDE_CONFIG } from './providers/claude/data';
 import { CODEX_CONFIG } from './providers/codex/data';
@@ -12,7 +13,12 @@ import { KIMI_CONFIG } from './providers/kimi/data';
 import { META_CONFIG } from './providers/meta/data';
 import { XAI_CONFIG } from './providers/xai/data';
 import type { QuotaProviderType } from './providers/types';
-import { QUOTA_TAB_ORDER, type QuotaSortMode, type QuotaTabId } from './constants';
+import {
+  QUOTA_AUTO_REFRESH_MS,
+  QUOTA_TAB_ORDER,
+  type QuotaSortMode,
+  type QuotaTabId,
+} from './constants';
 
 const QUOTA_FILTER_MAP: Record<QuotaProviderType, (file: AuthFileItem) => boolean> = {
   antigravity: ANTIGRAVITY_CONFIG.filterFn,
@@ -27,6 +33,53 @@ const QUOTA_FILTER_MAP: Record<QuotaProviderType, (file: AuthFileItem) => boolea
 export interface QuotaFileEntry {
   file: AuthFileItem;
   type: QuotaProviderType;
+}
+
+/** Every classified quota account. The current page, tab, and search do not narrow this list. */
+export function refreshAllQuotaTargets<T>(entries: readonly T[]): T[] {
+  return [...entries];
+}
+
+export function shouldStartQuotaRefresh(input: {
+  controlsDisabled: boolean;
+  listLoading: boolean;
+  batchLoading: boolean;
+  alreadyRunning: boolean;
+}): boolean {
+  return (
+    !input.controlsDisabled && !input.listLoading && !input.batchLoading && !input.alreadyRunning
+  );
+}
+
+/** Null pauses useInterval. The timer runs only on a visible, connected quota page. */
+export function quotaAutoRefreshDelay(
+  pageVisible: boolean,
+  controlsDisabled: boolean
+): number | null {
+  if (!pageVisible || controlsDisabled) return null;
+  return QUOTA_AUTO_REFRESH_MS;
+}
+
+/**
+ * Accounts whose quota never settled, or settled `maxAgeMs` or longer ago.
+ * Both the quota page and the dashboard load these on arrival, so a visit
+ * shows numbers without a click and a quick return does not refetch.
+ */
+export function staleQuotaEntries<T extends { file: AuthFileItem }>(
+  entries: readonly T[],
+  loadedAtByKey: Readonly<Record<string, number>>,
+  nowMs: number,
+  maxAgeMs: number = QUOTA_AUTO_REFRESH_MS
+): T[] {
+  return entries.filter((entry) => {
+    const loadedAtMs = loadedAtByKey[getQuotaCacheKey(entry.file)];
+    return loadedAtMs === undefined || nowMs - loadedAtMs >= maxAgeMs;
+  });
+}
+
+/** The first visit shows skeletons. A later refresh keeps the ledger on screen. */
+export function showQuotaInitialSkeleton(loading: boolean, fileCount: number): boolean {
+  return loading && fileCount === 0;
 }
 
 /** A refresh-all intent belongs to the session that requested a successful list read. */

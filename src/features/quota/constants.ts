@@ -13,8 +13,11 @@ export const QUOTA_TAB_ORDER: readonly QuotaProviderType[] = [
 
 export type QuotaTabId = 'all' | QuotaProviderType;
 
-/** 页级分页固定 20/页，同时把「刷新全部」的上游并发限制在 20。 */
+/** Ledger and card pages show 20 accounts. Refresh all quota is not limited to this page. */
 export const QUOTA_PAGE_SIZE = 20;
+
+/** Quota page timer. Hidden or disconnected pages pass null to useInterval instead. */
+export const QUOTA_AUTO_REFRESH_MS = 5 * 60 * 1000;
 
 /** 卡片排序：默认 = provider 分组序；soonest = 最快恢复优先。 */
 export const QUOTA_SORT_MODES = ['default', 'soonest'] as const;

@@ -25,7 +25,10 @@ export interface ProviderTraffic {
   credentials: number;
   success: number;
   failure: number;
+  /** success + failure inside the bucket window */
   total: number;
+  /** Lifetime success + failed counters, since the proxy last started */
+  lifetimeTotal: number;
   successRate: number | null;
   buckets: RecentRequestBucket[];
 }

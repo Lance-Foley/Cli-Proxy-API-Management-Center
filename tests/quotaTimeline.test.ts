@@ -314,6 +314,85 @@ describe('buildTimelineLane', () => {
     expect(lane.remaining).toBe(30);
   });
 
+  describe('claude: the weekly lane stays on the account-wide 7-day limit', () => {
+    // Values from a real ledger: 5h 28%, 7-day 93%, 7-day Fable 5 0%. Anthropic's
+    // `resets_at` carries fractional seconds, so the model-scoped window can reset a
+    // few hundred milliseconds "sooner" and used to win the reset-time tie-break.
+    const fiveHourReset = at(2026, 9, 8, 18, 40);
+    const weeklyReset = at(2026, 9, 10, 18, 0) + 400;
+    const fableReset = at(2026, 9, 10, 18, 0) + 100;
+    const windows = [
+      {
+        id: 'five-hour',
+        label: '5-hour limit',
+        usedPercent: 28,
+        resetAtMs: fiveHourReset,
+        periodHours: 5,
+      },
+      {
+        id: 'seven-day',
+        label: '7-day limit',
+        usedPercent: 93,
+        resetAtMs: weeklyReset,
+        periodHours: 168,
+      },
+      {
+        id: 'seven-day-fable',
+        label: '7-day Fable 5',
+        usedPercent: 0,
+        resetAtMs: fableReset,
+        periodHours: 168,
+      },
+    ];
+
+    test('a model-scoped window resetting a moment earlier does not take the lane', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: { status: 'success', windows },
+        maxPeriodHours: 14 * 24,
+      });
+      expect(lane.anchorMs).toBe(weeklyReset);
+      expect(lane.periodHours).toBe(168);
+      expect(lane.remaining).toBe(7);
+    });
+
+    test('nor does one listed first with an identical reset', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: {
+          status: 'success',
+          windows: [{ ...windows[2], resetAtMs: weeklyReset }, windows[1], windows[0]],
+        },
+        maxPeriodHours: 14 * 24,
+      });
+      expect(lane.remaining).toBe(7);
+    });
+
+    test('a model-scoped weekly window still anchors when it is the only one', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: { status: 'success', windows: [windows[0], windows[2]] },
+        maxPeriodHours: 14 * 24,
+      });
+      expect(lane.anchorMs).toBe(fableReset);
+      expect(lane.remaining).toBe(100);
+    });
+
+    test('the session view keeps the 5-hour window', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: { status: 'success', windows },
+        maxPeriodHours: 3 * 24,
+      });
+      expect(lane.anchorMs).toBe(fiveHourReset);
+      expect(lane.remaining).toBe(72);
+    });
+  });
+
   test('codex: includes available reset credits with parseable expiry dates', () => {
     const expiresAt = '2026-08-02T12:00:00Z';
     const lane = buildTimelineLane({

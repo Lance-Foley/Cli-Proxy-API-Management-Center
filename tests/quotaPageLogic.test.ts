@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { QUOTA_PAGE_SIZE } from '@/features/quota/constants';
+import { QUOTA_AUTO_REFRESH_MS, QUOTA_PAGE_SIZE } from '@/features/quota/constants';
 import {
   buildTabCounts,
   canRefreshQuotaAfterList,
@@ -8,7 +8,11 @@ import {
   filterEntriesBySearch,
   isQuotaRefreshDisabled,
   paginate,
+  quotaAutoRefreshDelay,
+  refreshAllQuotaTargets,
   resolveQuotaProviderType,
+  shouldStartQuotaRefresh,
+  showQuotaInitialSkeleton,
   sortQuotaEntries,
   type QuotaFileEntry,
 } from '@/features/quota/logic';
@@ -140,6 +144,49 @@ describe('filterEntriesBySearch', () => {
     expect(paginate(filterEntriesBySearch(all, 'missing'), 1, QUOTA_PAGE_SIZE).pageItems).toEqual(
       []
     );
+  });
+});
+
+describe('refresh all quota', () => {
+  const idle = {
+    controlsDisabled: false,
+    listLoading: false,
+    batchLoading: false,
+    alreadyRunning: false,
+  };
+
+  test('includes every account, including accounts past the first page', () => {
+    const entries = classifyQuotaFiles(
+      Array.from({ length: QUOTA_PAGE_SIZE + 3 }, (_, index) =>
+        file(`codex-${index}.json`, 'codex')
+      )
+    );
+    const pageItems = paginate(entries, 1, QUOTA_PAGE_SIZE).pageItems;
+
+    expect(refreshAllQuotaTargets(entries)).toEqual(entries);
+    expect(refreshAllQuotaTargets(entries)).toHaveLength(QUOTA_PAGE_SIZE + 3);
+    expect(pageItems).toHaveLength(QUOTA_PAGE_SIZE);
+  });
+
+  test('starts a refresh only when the page is idle and connected', () => {
+    expect(shouldStartQuotaRefresh(idle)).toBe(true);
+    expect(shouldStartQuotaRefresh({ ...idle, controlsDisabled: true })).toBe(false);
+    expect(shouldStartQuotaRefresh({ ...idle, listLoading: true })).toBe(false);
+    expect(shouldStartQuotaRefresh({ ...idle, batchLoading: true })).toBe(false);
+    expect(shouldStartQuotaRefresh({ ...idle, alreadyRunning: true })).toBe(false);
+  });
+
+  test('waits 5 minutes, and pauses when the tab is hidden or the page is disconnected', () => {
+    expect(QUOTA_AUTO_REFRESH_MS).toBe(5 * 60 * 1000);
+    expect(quotaAutoRefreshDelay(true, false)).toBe(QUOTA_AUTO_REFRESH_MS);
+    expect(quotaAutoRefreshDelay(false, false)).toBeNull();
+    expect(quotaAutoRefreshDelay(true, true)).toBeNull();
+  });
+
+  test('keeps the ledger on screen after the first file list arrives', () => {
+    expect(showQuotaInitialSkeleton(true, 0)).toBe(true);
+    expect(showQuotaInitialSkeleton(true, 4)).toBe(false);
+    expect(showQuotaInitialSkeleton(false, 0)).toBe(false);
   });
 });
 

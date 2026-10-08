@@ -65,23 +65,26 @@ export function QuotaHeader(props: QuotaHeaderProps) {
         </p>
       </div>
       <div className={styles.actions} data-reveal>
-        <button
-          type="button"
-          className={styles.secondaryAction}
-          onClick={onToggleEmails}
-          aria-pressed={showEmails}
-        >
-          {t(showEmails ? 'quota_management.hide_emails' : 'quota_management.show_emails')}
-        </button>
-        <button
-          type="button"
-          className={styles.primaryAction}
-          onClick={onRefreshAll}
-          disabled={disableControls || refreshing}
-        >
-          <IconRefreshCw size={14} className={refreshing ? styles.spinning : undefined} />
-          {t('quota_management.refresh_all_credentials')}
-        </button>
+        <div className={styles.actionRow}>
+          <button
+            type="button"
+            className={styles.secondaryAction}
+            onClick={onToggleEmails}
+            aria-pressed={showEmails}
+          >
+            {t(showEmails ? 'quota_management.hide_emails' : 'quota_management.show_emails')}
+          </button>
+          <button
+            type="button"
+            className={styles.primaryAction}
+            onClick={onRefreshAll}
+            disabled={disableControls || refreshing}
+          >
+            <IconRefreshCw size={14} className={refreshing ? styles.spinning : undefined} />
+            {t('quota_management.refresh_all_quota')}
+          </button>
+        </div>
+        <p className={styles.autoRefresh}>{t('quota_management.refresh_every_five_minutes')}</p>
       </div>
     </header>
   );

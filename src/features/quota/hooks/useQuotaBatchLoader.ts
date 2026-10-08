@@ -10,7 +10,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { captureQuotaCacheGeneration, commitIfQuotaCacheCurrent } from '@/stores';
+import { captureQuotaCacheGeneration, commitIfQuotaCacheCurrent, useQuotaStore } from '@/stores';
 import { getStatusFromError } from '@/utils/quota';
 import { getQuotaCacheKey } from '@/utils/quota/identity';
 import type { QuotaFileEntry } from '../logic';
@@ -107,6 +107,7 @@ export function useQuotaBatchLoader() {
               });
               return nextState;
             });
+            useQuotaStore.getState().markQuotaLoaded([...committedStates.keys()], Date.now());
             results.forEach((result, index) => {
               const state = committedStates.get(result.cacheKey);
               if (result.status === 'success' && state) {

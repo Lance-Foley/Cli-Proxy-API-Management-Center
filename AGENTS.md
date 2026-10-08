@@ -26,6 +26,7 @@ Use Bun; `package.json` pins `bun@1.3.14`, and CI uses Node.js 24. Keep dependen
 - `bun run lint`: run ESLint over TypeScript/TSX files. Some rules emit warnings; the current command does not enforce zero warnings.
 - `bun run type-check`: run `tsc --noEmit`; the main TypeScript config includes `src`, not `tests`.
 - `bun run verify`: run tests, lint, and build (which includes TypeScript compilation).
+- `bun run deploy:local`: run `verify`, then atomically install `dist/index.html` as the locally running proxy's `management.html` (default `/opt/homebrew/etc/static`; override with `MANAGEMENT_STATIC_PATH`) with dated backups, and confirm the proxy serves it.
 - `bun run format`: format all `src/**/*.{ts,tsx,css,scss}`. Prefer targeted formatting of changed files during routine work to avoid unrelated diffs.
 
 ## Deployment Constraints

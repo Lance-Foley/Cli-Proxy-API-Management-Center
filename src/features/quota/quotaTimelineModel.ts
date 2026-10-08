@@ -361,25 +361,22 @@ export function buildTimelineLane(input: TimelineLaneInput): TimelineLane {
     const windows = ((quota as { windows?: WindowLike[] }).windows ?? []).filter(
       (window) => typeof window.resetAtMs === 'number'
     );
-    const preferredCodexId =
-      maxPeriodHours !== undefined && maxPeriodHours <= SESSION_PERIOD_HOURS
-        ? 'five-hour'
-        : 'weekly';
-    // Codex can report model-scoped windows with the same period as the account
-    // window (for example GPT-5.3-Codex-Spark weekly). A reset-time tie-break
-    // would make the lane silently switch to that model's quota. Keep the lane
+    const sessionView = maxPeriodHours !== undefined && maxPeriodHours <= SESSION_PERIOD_HOURS;
+    const preferredId = sessionView ? 'five-hour' : provider === 'codex' ? 'weekly' : 'seven-day';
+    // Both providers report model-scoped windows with the same period as the
+    // account window (Codex: GPT-5.3-Codex-Spark weekly; Claude: 7-day Fable 5,
+    // Opus, Sonnet). A reset-time tie-break would make the lane silently switch
+    // to that model's quota — Claude's `resets_at` carries fractional seconds, so
+    // a model window "resetting" milliseconds earlier wins. Keep the lane
     // anchored to the standard account window whenever it fits this view.
-    const preferredCodexWindow =
-      provider === 'codex'
-        ? windows.find(
-            (window) =>
-              window.id === preferredCodexId &&
-              typeof window.periodHours === 'number' &&
-              window.periodHours > 0 &&
-              (maxPeriodHours === undefined || window.periodHours <= maxPeriodHours)
-          )
-        : undefined;
-    const chosen = preferredCodexWindow ?? pickLaneWindow(windows, maxPeriodHours);
+    const preferredWindow = windows.find(
+      (window) =>
+        window.id === preferredId &&
+        typeof window.periodHours === 'number' &&
+        window.periodHours > 0 &&
+        (maxPeriodHours === undefined || window.periodHours <= maxPeriodHours)
+    );
+    const chosen = preferredWindow ?? pickLaneWindow(windows, maxPeriodHours);
     if (!chosen) return empty;
 
     const resetCredits =

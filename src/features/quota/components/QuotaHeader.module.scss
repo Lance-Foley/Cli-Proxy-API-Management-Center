@@ -76,9 +76,24 @@
 
 .actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.actionRow {
+  display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+}
+
+.autoRefresh {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--text-tertiary);
 }
 
 /* Quiet outlined pill beside the primary action */
@@ -175,7 +190,7 @@
   }
 
   .actions {
-    justify-content: flex-start;
+    align-items: flex-start;
   }
 }
 

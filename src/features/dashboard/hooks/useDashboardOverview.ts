@@ -1,15 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { authFilesApi } from '@/services/api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiClient, authFilesApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useModelsStore } from '@/stores';
 import { useApiKeysForModels } from '@/hooks/useApiKeysForModels';
+import { useInterval } from '@/hooks/useInterval';
 import { useProviderRecentRequests } from '@/components/providers/hooks/useProviderRecentRequests';
-import {
-  mergeRecentRequestBucketGroups,
-  normalizeRecentRequestUsageEntry,
-  type RecentRequestBucket,
-} from '@/utils/recentRequests';
+import { mergeRecentRequestBucketGroups, type RecentRequestBucket } from '@/utils/recentRequests';
 import type { Config } from '@/types';
 import type { AuthFileItem } from '@/types/authFile';
+import {
+  advanceActivity,
+  parseObservedAtMs,
+  type ActivityClock,
+  type ActivityRecord,
+} from '../activity';
+import {
+  accountSourcesFromApiKeyUsage,
+  accountSourcesFromFiles,
+  activitySamples,
+  apiKeysInUsage,
+  providerIdOfAuthFile,
+  type AccountSource,
+} from '../accounts';
 import {
   TRAFFIC_BUCKET_MINUTES,
   type CredentialHealth,
@@ -17,6 +28,10 @@ import {
   type ProviderTraffic,
   type TrafficWindow,
 } from '../types';
+import { maskApiKey } from '@/utils/format';
+
+/** Live view cadence. The proxy is local, and `/credentials` is an in-memory read. */
+export const DASHBOARD_LIVE_POLL_MS = 30_000;
 
 const EMPTY_TRAFFIC: TrafficWindow = {
   buckets: [],
@@ -29,20 +44,7 @@ const EMPTY_TRAFFIC: TrafficWindow = {
   windowMinutes: 0,
 };
 
-/** `api-key-usage` 的键形如 `<baseUrl>|<apiKey>`，取第一个分隔符之后的部分 */
-const apiKeyFromCompositeKey = (compositeKey: string): string => {
-  const separatorIndex = compositeKey.indexOf('|');
-  return separatorIndex < 0 ? '' : compositeKey.slice(separatorIndex + 1).trim();
-};
-
-const providerIdOfAuthFile = (file: AuthFileItem): string => {
-  const candidate = String(file.type ?? file.provider ?? '')
-    .trim()
-    .toLowerCase();
-  return candidate && candidate !== 'empty' ? candidate : 'unknown';
-};
-
-const buildTrafficWindow = (bucketGroups: RecentRequestBucket[][]): TrafficWindow => {
+export const buildTrafficWindow = (bucketGroups: RecentRequestBucket[][]): TrafficWindow => {
   const buckets = mergeRecentRequestBucketGroups(bucketGroups);
   if (buckets.length === 0) {
     return EMPTY_TRAFFIC;
@@ -77,19 +79,44 @@ const buildTrafficWindow = (bucketGroups: RecentRequestBucket[][]): TrafficWindo
   };
 };
 
-interface ProviderAccumulator {
-  credentials: number;
-  success: number;
-  failure: number;
-  bucketGroups: RecentRequestBucket[][];
-}
+/**
+ * Per-provider rollup. Totals and success rate cover the same bucket window as
+ * the headline and chart; the lifetime counters ride along as a separate field.
+ */
+export const buildProviderTraffic = (sources: readonly AccountSource[]): ProviderTraffic[] => {
+  const groups = new Map<string, AccountSource[]>();
+  sources.forEach((source) => {
+    const group = groups.get(source.provider) ?? [];
+    group.push(source);
+    groups.set(source.provider, group);
+  });
 
-const createAccumulator = (): ProviderAccumulator => ({
-  credentials: 0,
-  success: 0,
-  failure: 0,
-  bucketGroups: [],
-});
+  return Array.from(groups.entries())
+    .map(([id, group]) => {
+      const success = group.reduce((sum, source) => sum + source.windowSuccess, 0);
+      const failure = group.reduce((sum, source) => sum + source.windowFailure, 0);
+      const total = success + failure;
+      return {
+        id,
+        credentials: group.length,
+        success,
+        failure,
+        total,
+        lifetimeTotal: group.reduce((sum, source) => sum + source.lifetimeTotal, 0),
+        successRate: total > 0 ? (success / total) * 100 : null,
+        buckets: mergeRecentRequestBucketGroups(
+          group.map((source) => source.buckets).filter((buckets) => buckets.length > 0)
+        ),
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.total - a.total ||
+        b.lifetimeTotal - a.lifetimeTotal ||
+        b.credentials - a.credentials ||
+        a.id.localeCompare(b.id)
+    );
+};
 
 export const getProviderKeyCounts = (config: Config) => ({
   gemini: config.geminiApiKeys?.length ?? 0,
@@ -102,16 +129,54 @@ export const getProviderKeyCounts = (config: Config) => ({
   openai: config.openaiCompatibility?.length ?? 0,
 });
 
+interface CredentialSnapshot {
+  files: AuthFileItem[];
+  clock: ActivityClock;
+}
+
 /**
- * 汇总仪表盘所需的全部数据。
+ * Activity ledgers outlive the page so a quick trip to another route keeps the
+ * exact readings. A new connection or key starts from scratch.
+ */
+const activityScope = {
+  id: '',
+  files: new Map<string, ActivityRecord>() as ReadonlyMap<string, ActivityRecord>,
+  apiKeys: new Map<string, ActivityRecord>() as ReadonlyMap<string, ActivityRecord>,
+};
+
+const activityLedgersFor = (scopeId: string) => {
+  if (activityScope.id !== scopeId) {
+    activityScope.id = scopeId;
+    activityScope.files = new Map();
+    activityScope.apiKeys = new Map();
+  }
+  return activityScope;
+};
+
+const usePageVisible = () => {
+  const [visible, setVisible] = useState(() =>
+    typeof document === 'undefined' ? true : !document.hidden
+  );
+  useEffect(() => {
+    const sync = () => setVisible(!document.hidden);
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, []);
+  return visible;
+};
+
+/**
+ * Everything the command center shows.
  *
- * 流量数据有两个互不重叠的来源：`api-key-usage`（配置内联的 API Key 凭证）
- * 与 `auth-files`（文件/运行时凭证）。后端对二者的判定条件互斥，但插件提供的
- * 凭证理论上可同时命中，因此这里按 `account_type` + `account` 做一次防御性去重。
+ * Traffic comes from two sources that do not overlap: `api-key-usage` (API keys
+ * from the config) and `/credentials` (file and runtime credentials). The
+ * backend keeps them apart, but a plugin credential could appear in both, so an
+ * `api_key` credential already in `api-key-usage` is skipped.
  */
 export function useDashboardOverview() {
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const apiBase = useAuthStore((state) => state.apiBase);
+  const managementKey = useAuthStore((state) => state.managementKey);
   const config = useConfigStore((state) => state.config);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
 
@@ -121,21 +186,37 @@ export function useDashboardOverview() {
   const fetchModelsFromStore = useModelsStore((state) => state.fetchModels);
 
   const connected = connectionStatus === 'connected';
+  const pageVisible = usePageVisible();
   const resolveApiKeysForModels = useApiKeysForModels();
 
   const { usageByProvider, refreshRecentRequests } = useProviderRecentRequests({
     enabled: connected,
   });
 
-  const [authFiles, setAuthFiles] = useState<AuthFileItem[] | null>(null);
+  const [snapshot, setSnapshot] = useState<CredentialSnapshot | null>(null);
+  const [lastUpdatedAtMs, setLastUpdatedAtMs] = useState<number | null>(null);
+  const [pollFailed, setPollFailed] = useState(false);
+  const listRequestRef = useRef(0);
 
   const loadAuthFiles = useCallback(async () => {
     if (!connected) return;
+    const requestId = ++listRequestRef.current;
+    const revision = apiClient.getConnectionRevision();
+    const isCurrent = () =>
+      requestId === listRequestRef.current && revision === apiClient.getConnectionRevision();
     try {
       const response = await authFilesApi.list();
-      setAuthFiles(response.files);
+      if (!isCurrent()) return;
+      const receivedAtMs = Date.now();
+      setSnapshot({
+        files: response.files,
+        clock: { receivedAtMs, observedAtMs: parseObservedAtMs(response.observedAt) },
+      });
+      setLastUpdatedAtMs(receivedAtMs);
+      setPollFailed(false);
     } catch {
-      setAuthFiles(null);
+      // Keep the last good board on screen; the status line reports the miss.
+      if (isCurrent()) setPollFailed(true);
     }
   }, [connected]);
 
@@ -145,7 +226,7 @@ export function useDashboardOverview() {
       const apiKeys = await resolveApiKeysForModels();
       await fetchModelsFromStore(apiBase, apiKeys[0]);
     } catch {
-      // 模型列表失败不应影响仪表盘其余部分
+      // A failed model list must not take the rest of the dashboard down.
     }
   }, [connected, apiBase, resolveApiKeysForModels, fetchModelsFromStore]);
 
@@ -154,7 +235,24 @@ export function useDashboardOverview() {
     void fetchConfig().catch(() => undefined);
     void loadAuthFiles();
     void loadModels();
+    return () => {
+      listRequestRef.current += 1;
+    };
   }, [connected, fetchConfig, loadAuthFiles, loadModels]);
+
+  const livePoll = useCallback(() => {
+    void loadAuthFiles();
+    void refreshRecentRequests().catch(() => undefined);
+  }, [loadAuthFiles, refreshRecentRequests]);
+
+  useInterval(livePoll, connected && pageVisible ? DASHBOARD_LIVE_POLL_MS : null);
+
+  // Coming back to the tab: read immediately instead of waiting out the interval.
+  const wasVisibleRef = useRef(pageVisible);
+  useEffect(() => {
+    if (pageVisible && !wasVisibleRef.current && connected) livePoll();
+    wasVisibleRef.current = pageVisible;
+  }, [connected, livePoll, pageVisible]);
 
   const refresh = useCallback(async () => {
     if (!connected) return;
@@ -166,81 +264,57 @@ export function useDashboardOverview() {
     ]);
   }, [connected, fetchConfig, loadAuthFiles, loadModels, refreshRecentRequests]);
 
+  const authFiles = snapshot?.files ?? null;
+  const usageKeys = useMemo(() => apiKeysInUsage(usageByProvider), [usageByProvider]);
+  const fileSources = useMemo(
+    () => accountSourcesFromFiles(authFiles ?? [], usageKeys),
+    [authFiles, usageKeys]
+  );
+  const apiKeySources = useMemo(
+    () => accountSourcesFromApiKeyUsage(usageByProvider, maskApiKey),
+    [usageByProvider]
+  );
+  const sources = useMemo(() => [...fileSources, ...apiKeySources], [fileSources, apiKeySources]);
+
+  /* ---------- Activity ledgers ----------
+   * Folded in effects, not during render. Re-folding the same snapshot is a
+   * no-op (unchanged counters keep their reading), so extra runs are harmless. */
+
+  const scopeId = `${apiBase}\0${managementKey}`;
+  const [fileLedger, setFileLedger] = useState(() => activityLedgersFor(scopeId).files);
+  const [apiKeyLedger, setApiKeyLedger] = useState(() => activityLedgersFor(scopeId).apiKeys);
+
+  useEffect(() => {
+    if (!snapshot) return;
+    const scope = activityLedgersFor(scopeId);
+    scope.files = advanceActivity(scope.files, activitySamples(fileSources), snapshot.clock);
+    setFileLedger(scope.files);
+  }, [fileSources, snapshot, scopeId]);
+
+  useEffect(() => {
+    if (!connected) return;
+    const scope = activityLedgersFor(scopeId);
+    scope.apiKeys = advanceActivity(scope.apiKeys, activitySamples(apiKeySources), {
+      receivedAtMs: Date.now(),
+    });
+    setApiKeyLedger(scope.apiKeys);
+  }, [apiKeySources, connected, scopeId]);
+
+  const activity = useMemo(
+    () => new Map<string, ActivityRecord>([...fileLedger, ...apiKeyLedger]),
+    [fileLedger, apiKeyLedger]
+  );
+
   const providerKeyCounts = useMemo(() => (config ? getProviderKeyCounts(config) : null), [config]);
 
-  const { traffic, providers } = useMemo(() => {
-    const accumulators = new Map<string, ProviderAccumulator>();
-    const allBucketGroups: RecentRequestBucket[][] = [];
-    const apiKeysFromUsage = new Set<string>();
-
-    const accumulatorFor = (providerId: string): ProviderAccumulator => {
-      const existing = accumulators.get(providerId);
-      if (existing) return existing;
-      const created = createAccumulator();
-      accumulators.set(providerId, created);
-      return created;
-    };
-
-    usageByProvider.forEach((entriesByKey, providerId) => {
-      const accumulator = accumulatorFor(providerId);
-      entriesByKey.forEach((entry, compositeKey) => {
-        const apiKey = apiKeyFromCompositeKey(compositeKey);
-        if (apiKey) {
-          apiKeysFromUsage.add(apiKey);
-        }
-        accumulator.credentials += 1;
-        accumulator.success += entry.success;
-        accumulator.failure += entry.failed;
-        if (entry.recentRequests.length > 0) {
-          accumulator.bucketGroups.push(entry.recentRequests);
-          allBucketGroups.push(entry.recentRequests);
-        }
-      });
-    });
-
-    (authFiles ?? []).forEach((file) => {
-      const accountType = String(file.account_type ?? '')
-        .trim()
-        .toLowerCase();
-      const account = String(file.account ?? '').trim();
-      // 已经由 api-key-usage 统计过的凭证不再重复计入
-      if (accountType === 'api_key' && account && apiKeysFromUsage.has(account)) {
-        return;
-      }
-
-      const accumulator = accumulatorFor(providerIdOfAuthFile(file));
-      const entry = normalizeRecentRequestUsageEntry(file);
-      accumulator.credentials += 1;
-      accumulator.success += entry.success;
-      accumulator.failure += entry.failed;
-      if (entry.recentRequests.length > 0) {
-        accumulator.bucketGroups.push(entry.recentRequests);
-        allBucketGroups.push(entry.recentRequests);
-      }
-    });
-
-    const providerRows: ProviderTraffic[] = Array.from(accumulators.entries())
-      .map(([id, accumulator]) => {
-        const total = accumulator.success + accumulator.failure;
-        return {
-          id,
-          credentials: accumulator.credentials,
-          success: accumulator.success,
-          failure: accumulator.failure,
-          total,
-          successRate: total > 0 ? (accumulator.success / total) * 100 : null,
-          buckets: mergeRecentRequestBucketGroups(accumulator.bucketGroups),
-        };
-      })
-      .sort(
-        (a, b) => b.total - a.total || b.credentials - a.credentials || a.id.localeCompare(b.id)
-      );
-
-    return {
-      traffic: buildTrafficWindow(allBucketGroups),
-      providers: providerRows,
-    };
-  }, [usageByProvider, authFiles]);
+  const traffic = useMemo(
+    () =>
+      buildTrafficWindow(
+        sources.map((source) => source.buckets).filter((buckets) => buckets.length > 0)
+      ),
+    [sources]
+  );
+  const providers = useMemo(() => buildProviderTraffic(sources), [sources]);
 
   const credentials = useMemo<CredentialHealth | null>(() => {
     if (!authFiles) return null;
@@ -291,6 +365,12 @@ export function useDashboardOverview() {
     traffic,
     providers,
     credentials,
+    authFiles,
+    sources,
+    activity,
+    lastUpdatedAtMs,
+    pollFailed,
+    live: connected && pageVisible,
     refresh,
   };
 }

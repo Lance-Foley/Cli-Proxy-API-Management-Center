@@ -1,0 +1,548 @@
+@use '../../../styles/mixins' as *;
+
+/* One dense row per account. Columns stay put so the eye can run down
+   "live?", "busy?", "quota left?" without re-reading each row's layout. */
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-full;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color $transition-fast,
+    color $transition-fast;
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+}
+
+.chipOn {
+  border-color: transparent;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.chipCount {
+  font-family: $font-mono;
+  font-size: 11px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+}
+
+.chipLiveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--viz-success);
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-color);
+  border-radius: $radius-full;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color $transition-fast,
+    color $transition-fast;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+}
+
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+}
+
+.table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th,
+.table td {
+  padding: 12px 14px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.table tbody tr:last-child th,
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table thead th {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
+  color: var(--text-tertiary);
+  font-family: $font-mono;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* A live row carries a thin green rule on its leading edge — the only
+   decoration on the table, so it reads as signal, not chrome. */
+/* Durations keep their own case: "3h 20m", not "3H 20M". */
+.thNote {
+  margin-left: 4px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-quaternary);
+}
+
+.rowLive > th:first-child {
+  box-shadow: inset 3px 0 0 var(--viz-success);
+}
+
+.account {
+  width: 30%;
+  font-weight: 400;
+}
+
+.accountInner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.iconWrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+}
+
+.icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.iconFallback {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.name {
+  max-width: 300px;
+  font-family: $font-mono;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  @include text-ellipsis;
+}
+
+.sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.provider {
+  color: var(--text-tertiary);
+}
+
+.plan {
+  max-width: 140px;
+  font-weight: 650;
+  color: var(--text-secondary);
+  @include text-ellipsis;
+}
+
+.state {
+  white-space: nowrap;
+}
+
+.stateReady {
+  color: var(--text-tertiary);
+}
+
+.stateCooling {
+  color: var(--amber-color);
+  font-weight: 650;
+}
+
+.stateProblem {
+  color: var(--viz-failure);
+  font-weight: 650;
+}
+
+.stateDisabled {
+  color: var(--text-quaternary);
+}
+
+.activity {
+  width: 15%;
+  white-space: nowrap;
+}
+
+.livePill,
+.idlePill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: $radius-full;
+  font-family: $font-mono;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.livePill {
+  border: 1px solid color-mix(in srgb, var(--viz-success) 35%, transparent);
+  background: color-mix(in srgb, var(--viz-success) 9%, transparent);
+  color: var(--success-badge-text);
+}
+
+.idlePill {
+  border: 1px solid var(--border-color);
+  color: var(--text-tertiary);
+}
+
+.liveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--viz-success);
+  animation: boardLivePing 2s ease-out infinite;
+}
+
+.lastActive {
+  display: block;
+  margin-top: 5px;
+  font-family: $font-mono;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.traffic {
+  width: 19%;
+}
+
+.spark {
+  display: block;
+  width: 100%;
+  max-width: 160px;
+  height: 22px;
+}
+
+.trafficNumbers {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  font-family: $font-mono;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+
+  b {
+    font-size: 12.5px;
+    font-weight: 650;
+    color: var(--text-primary);
+  }
+}
+
+.quota {
+  width: 26%;
+}
+
+.meters {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 0 0 76px;
+  width: 76px;
+}
+
+.meterTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  font-family: $font-mono;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.meterName {
+  min-width: 0;
+  color: var(--text-tertiary);
+  @include text-ellipsis;
+}
+
+.meterPct {
+  flex-shrink: 0;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.track {
+  display: block;
+  height: 4px;
+  border-radius: $radius-full;
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  overflow: hidden;
+}
+
+/* Same convention as the quota ledger: the fill is quota used, in green. */
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--viz-success);
+}
+
+.more {
+  flex: 0 0 auto;
+  font-family: $font-mono;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.reset {
+  width: 10%;
+  white-space: nowrap;
+}
+
+.resetRelative {
+  display: block;
+  font-family: $font-mono;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.resetAbsolute {
+  display: block;
+  margin-top: 3px;
+  font-family: $font-mono;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-quaternary);
+}
+
+.placeholder {
+  font-family: $font-mono;
+  font-size: 11.5px;
+  color: var(--text-quaternary);
+}
+
+.quotaExhausted {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-primary);
+  font-weight: 650;
+  white-space: nowrap;
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--viz-success);
+  }
+}
+
+.quotaError {
+  color: var(--viz-failure);
+  font-weight: 650;
+}
+
+.loadingRows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filterEmpty {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed var(--border-color);
+  border-radius: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.inlineButton {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary-active);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+}
+
+.emptyLink {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-active);
+}
+
+.footnote {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.spinning {
+  animation: boardSpin 0.8s linear infinite;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chip:hover:not(.chipOn),
+  .tool:hover:not(:disabled) {
+    border-color: var(--border-hover);
+    color: var(--text-primary);
+  }
+
+  .table tbody tr:hover {
+    background: color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip,
+  .tool {
+    transition: none;
+  }
+
+  .liveDot,
+  .spinning {
+    animation: none;
+  }
+}
+
+@keyframes boardLivePing {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--viz-success) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes boardSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}

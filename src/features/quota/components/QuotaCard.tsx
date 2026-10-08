@@ -36,8 +36,10 @@ export type QuotaCardProps = {
   resolvedTheme: ResolvedTheme;
   canRefresh: boolean;
   resetting: boolean;
-  /** `row` = one flat ledger line; `card` = the boxed grid card. */
+  /** `row` = one ledger row with stacked limits; `card` = the boxed grid card. */
   variant?: 'card' | 'row';
+  /** Inspector copy: no lift on hover. The roster already shows which row is open. */
+  quiet?: boolean;
   /** Hide the email inside the credential filename (screen sharing). */
   maskNames?: boolean;
   /** 首屏级联入场延迟；null = 不入场（切 tab / 翻页 / 刷新新挂载的卡片）。 */
@@ -54,6 +56,7 @@ export function QuotaCard(props: QuotaCardProps) {
     canRefresh,
     resetting,
     variant = 'card',
+    quiet = false,
     maskNames = false,
     entranceDelayMs,
     onRefresh,
@@ -97,7 +100,7 @@ export function QuotaCard(props: QuotaCardProps) {
 
   return (
     <article
-      className={`${styles.card} ${variant === 'row' ? styles.row : ''} ${
+      className={`${styles.card} ${quiet ? styles.quiet : ''} ${variant === 'row' ? styles.row : ''} ${
         mountEntranceDelayMs === null ? '' : styles.cardEnter
       }`}
       style={entranceStyle}

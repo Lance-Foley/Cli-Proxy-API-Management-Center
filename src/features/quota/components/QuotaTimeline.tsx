@@ -387,9 +387,9 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
           </span>
         ) : (
           windows.map((window) => {
-            // A label needs room to read; below that the bar speaks for itself
-            // and the detail lives in the tooltip.
-            const showLabel = window.widthPercent > (mode === 'session' ? 4.5 : 9);
+            // A label needs room to read. A short bar keeps the detail in the
+            // tooltip instead of clipping the date onto the fill.
+            const showLabel = window.widthPercent > (mode === 'session' ? 16 : 22);
             const endText =
               mode === 'session'
                 ? formatTime(window.endMs)

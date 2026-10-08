@@ -81,3 +81,43 @@ describe('buildProviderSummaries', () => {
     expect(summaries.map((s) => s.provider)).toEqual(['claude', 'kimi']);
   });
 });
+
+describe('buildProviderSummaries headline', () => {
+  test('pools the account-wide 7-day limit, not a model-scoped window that resets sooner', () => {
+    // Regression: the strip read "7-day Fable 5 · 15% of 300%" while the 7-day
+    // limits were 93%, 15%, and 74% — Fable's reset is milliseconds earlier.
+    const withFable = (weeklyUsed: number, resetInHours: number): QuotaCardState =>
+      ({
+        status: 'success',
+        windows: [
+          {
+            id: 'seven-day',
+            label: '7-day limit',
+            usedPercent: weeklyUsed,
+            resetAtMs: NOW + resetInHours * HOUR + 400,
+            periodHours: 168,
+          },
+          {
+            id: 'seven-day-fable',
+            label: '7-day Fable 5',
+            usedPercent: 0,
+            resetAtMs: NOW + resetInHours * HOUR + 100,
+            periodHours: 168,
+          },
+        ],
+      }) as unknown as QuotaCardState;
+
+    const entries = ['a', 'b', 'c'].map((name) => entry(`claude-${name}.json`, 'claude'));
+    const quotas = new Map<QuotaFileEntry, QuotaCardState>([
+      [entries[0], withFable(93, 54)],
+      [entries[1], withFable(15, 160)],
+      [entries[2], withFable(74, 46)],
+    ]);
+
+    const [summary] = buildProviderSummaries(entries, (e) => quotas.get(e), NOW);
+
+    expect(summary.label).toBe('7-day limit');
+    expect(summary.segments).toEqual([7, 85, 26]);
+    expect(summary.remainingTotal).toBe(118); // 182% used of 300%
+  });
+});

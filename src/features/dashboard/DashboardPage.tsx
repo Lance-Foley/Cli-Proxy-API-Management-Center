@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -9,15 +9,26 @@ import {
   IconSidebarQuota,
   IconSidebarSystem,
 } from '@/components/ui/icons';
-import { useAuthStore } from '@/stores';
+import { useAuthStore, useThemeStore } from '@/stores';
 import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
+import { useNow } from '@/hooks/useNow';
 import { formatCompactNumber, formatDateValue, formatPercent } from '@/utils/format';
-import { useDashboardOverview } from './hooks/useDashboardOverview';
+import { formatRelativeInstant } from '@/utils/quota';
+import { readQuotaUiState, writeQuotaUiState } from '@/features/quota/uiState';
+import { useDashboardOverview, DASHBOARD_LIVE_POLL_MS } from './hooks/useDashboardOverview';
+import { useAccountQuota } from './hooks/useAccountQuota';
+import { AccountBoard } from './components/AccountBoard';
 import { LiveWire } from './components/LiveWire';
 import { Meter } from './components/Meter';
 import { Sparkline } from './components/Sparkline';
 import { ThroughputChart } from './components/ThroughputChart';
 import { useCountUp, useRevealGroup, useRevealOnScroll } from '@/hooks/motion';
+import {
+  buildAccountViews,
+  countAccountFilters,
+  summarizeQuotaHeadroom,
+  type AccountFilter,
+} from './accounts';
 import { providerLabel, splitWindowMinutes, toneForSuccessRate, type MeterTone } from './utils';
 import styles from './dashboard.module.scss';
 
@@ -35,25 +46,79 @@ const TILE_ACCENTS: Record<MeterTone, string> = {
 const formatHeadline = (value: number): string =>
   value < 100_000 ? value.toLocaleString() : formatCompactNumber(value);
 
+const formatClock = (ms: number): string =>
+  new Date(ms).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
 export function DashboardPage() {
   const { t, i18n } = useTranslation();
   const serverVersion = useAuthStore((state) => state.serverVersion);
   const serverBuildDate = useAuthStore((state) => state.serverBuildDate);
+  const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
 
-  const { connectionStatus, connected, config, counts, traffic, providers, credentials, refresh } =
-    useDashboardOverview();
+  const {
+    connectionStatus,
+    connected,
+    config,
+    counts,
+    traffic,
+    providers,
+    credentials,
+    authFiles,
+    sources,
+    activity,
+    lastUpdatedAtMs,
+    pollFailed,
+    live,
+    refresh,
+  } = useDashboardOverview();
 
   useHeaderRefresh(refresh, connected);
+
+  const {
+    quotaFor,
+    batchLoading: quotaLoading,
+    refreshAll: refreshQuota,
+  } = useAccountQuota(authFiles, connected, live);
 
   /* Hero 与静态网格走分组级联；异步内容区（图表/供应商）保持整块 reveal */
   const heroRef = useRevealGroup<HTMLElement>();
   const statsRef = useRevealGroup<HTMLElement>(0.12);
+  const boardRef = useRevealOnScroll<HTMLElement>();
   const trafficRef = useRevealOnScroll<HTMLElement>();
   const fleetRef = useRevealOnScroll<HTMLElement>();
   const detailRef = useRevealGroup<HTMLElement>();
   const ctaRef = useRevealGroup<HTMLElement>();
 
   const animatedTotal = useCountUp(traffic.total, connected);
+
+  // The minute clock drives relative labels; a fresh poll moves "now" forward
+  // immediately so a just-seen request never reads as being in the future.
+  const minuteNow = useNow();
+  const nowMs = Math.max(minuteNow, lastUpdatedAtMs ?? 0);
+
+  const views = useMemo(
+    () => buildAccountViews(sources, activity, quotaFor, nowMs),
+    [sources, activity, quotaFor, nowMs]
+  );
+  const filterCounts = useMemo(() => countAccountFilters(views), [views]);
+  const headroom = useMemo(() => summarizeQuotaHeadroom(views), [views]);
+
+  const [boardFilter, setBoardFilter] = useState<AccountFilter>('all');
+  // Shared with the quota page: one switch decides whether emails are on screen.
+  const [showEmails, setShowEmails] = useState<boolean>(
+    () => readQuotaUiState()?.showEmails ?? false
+  );
+  const toggleEmails = useCallback(() => {
+    setShowEmails((previous) => {
+      writeQuotaUiState({ showEmails: !previous });
+      return !previous;
+    });
+  }, []);
 
   const windowLabel = useMemo(() => {
     if (traffic.windowMinutes <= 0) return DASH;
@@ -114,52 +179,82 @@ export function DashboardPage() {
   const versionLabel = serverVersion ? `v${serverVersion.trim().replace(/^[vV]+/, '')}` : null;
   const heroMetaLine = [versionLabel, connectionLabel].filter(Boolean).join(' · ');
 
-  const statTiles = [
-    {
-      key: 'success',
-      label: t('dashboard.success_rate'),
-      value: traffic.successRate === null ? DASH : formatPercent(traffic.successRate),
-      hint: t('dashboard.stat_success_hint', { total: traffic.total.toLocaleString() }),
-      meter: traffic.successRate,
-      tone: successRateTone,
-    },
-    {
-      key: 'credentials',
-      label: t('dashboard.stat_credentials'),
-      value: credentials ? credentials.total.toLocaleString() : DASH,
-      hint: credentials
-        ? t('dashboard.stat_credentials_hint', {
-            active: credentials.active,
-            disabled: credentials.disabled + credentials.unavailable,
-          })
-        : t('dashboard.stat_credentials_empty'),
-      meter:
-        credentials && credentials.total > 0
-          ? (credentials.active / credentials.total) * 100
-          : null,
-      tone: undefined,
-    },
-    {
-      key: 'providerKeys',
-      label: t('dashboard.stat_provider_keys'),
-      value: counts.providerKeys === null ? DASH : counts.providerKeys.toLocaleString(),
-      hint: t('dashboard.stat_provider_keys_hint'),
-      meter: null,
-      tone: undefined,
-    },
-    {
-      key: 'models',
-      label: t('dashboard.stat_models'),
-      value: counts.models === null ? DASH : counts.models.toLocaleString(),
-      hint: t('dashboard.stat_models_hint'),
-      meter: null,
-      tone: undefined,
-    },
-  ];
+  const pollSeconds = Math.round(DASHBOARD_LIVE_POLL_MS / 1000);
+  const liveStatus = !connected
+    ? null
+    : pollFailed
+      ? {
+          tone: 'warning' as const,
+          text:
+            lastUpdatedAtMs === null
+              ? t('dashboard.status_poll_failed_initial', { seconds: pollSeconds })
+              : t('dashboard.status_poll_failed', { time: formatClock(lastUpdatedAtMs) }),
+        }
+      : live
+        ? {
+            tone: 'live' as const,
+            text:
+              lastUpdatedAtMs === null
+                ? t('dashboard.status_live', { seconds: pollSeconds })
+                : t('dashboard.status_live_updated', {
+                    seconds: pollSeconds,
+                    time: formatClock(lastUpdatedAtMs),
+                  }),
+          }
+        : { tone: 'paused' as const, text: t('dashboard.status_paused') };
+
+  // Until the first credential read lands, "0 of 0" would be a claim, not a fact.
+  const accountsLoaded = connected && authFiles !== null;
+  const activeTotal = views.length;
+  const activeCount = filterCounts.live;
+  const activeTone: MeterTone =
+    !accountsLoaded || activeTotal === 0 ? 'idle' : activeCount > 0 ? 'good' : 'idle';
+
+  const quotaTone: MeterTone =
+    headroom.tracked === 0 || headroom.open + headroom.exhausted === 0
+      ? 'idle'
+      : headroom.open === 0
+        ? 'critical'
+        : headroom.exhausted > 0
+          ? 'warning'
+          : 'good';
+  const quotaHint = (() => {
+    if (headroom.tracked === 0) return t('dashboard.vital_quota_none');
+    if (headroom.exhausted > 0 && headroom.nextRecoveryMs !== null) {
+      return t('dashboard.vital_quota_recovery', {
+        count: headroom.exhausted,
+        relative: formatRelativeInstant(headroom.nextRecoveryMs, nowMs, i18n.resolvedLanguage),
+      });
+    }
+    if (headroom.nextResetMs !== null) {
+      return t('dashboard.vital_quota_next_reset', {
+        relative: formatRelativeInstant(headroom.nextResetMs, nowMs, i18n.resolvedLanguage),
+      });
+    }
+    return quotaLoading
+      ? t('quota_management.roster_health_loading')
+      : t('dashboard.vital_quota_pending');
+  })();
+
+  const credentialsTone: MeterTone | undefined = credentials
+    ? credentials.unavailable > 0
+      ? 'warning'
+      : credentials.active > 0
+        ? 'good'
+        : 'idle'
+    : undefined;
 
   const runtimeRows: Array<{ label: string; value: string; mono?: boolean }> = [
     { label: t('dashboard.runtime_routing'), value: routingStrategy },
     { label: t('dashboard.runtime_retry'), value: String(config?.requestRetry ?? 0) },
+    {
+      label: t('dashboard.stat_provider_keys'),
+      value: counts.providerKeys === null ? DASH : counts.providerKeys.toLocaleString(),
+    },
+    {
+      label: t('dashboard.stat_models'),
+      value: counts.models === null ? DASH : counts.models.toLocaleString(),
+    },
     {
       label: t('dashboard.runtime_management_keys'),
       value: counts.managementKeys === null ? DASH : String(counts.managementKeys),
@@ -185,37 +280,37 @@ export function DashboardPage() {
   const ctaCards = [
     {
       to: '/ai-providers',
-      icon: <IconBot size={20} />,
+      icon: <IconBot size={18} />,
       title: t('nav.ai_providers'),
       description: t('dashboard.cta_providers_desc'),
     },
     {
       to: '/auth-files',
-      icon: <IconFileText size={20} />,
+      icon: <IconFileText size={18} />,
       title: t('nav.auth_files'),
       description: t('dashboard.cta_auth_files_desc'),
     },
     {
       to: '/config',
-      icon: <IconSidebarConfig size={20} />,
+      icon: <IconSidebarConfig size={18} />,
       title: t('nav.config_management'),
       description: t('dashboard.cta_config_desc'),
     },
     {
       to: '/quota',
-      icon: <IconSidebarQuota size={20} />,
+      icon: <IconSidebarQuota size={18} />,
       title: t('nav.quota_management'),
       description: t('dashboard.cta_quota_desc'),
     },
     {
       to: '/logs',
-      icon: <IconSidebarLogs size={20} />,
+      icon: <IconSidebarLogs size={18} />,
       title: t('nav.logs'),
       description: t('dashboard.cta_logs_desc'),
     },
     {
       to: '/system',
-      icon: <IconSidebarSystem size={20} />,
+      icon: <IconSidebarSystem size={18} />,
       title: t('nav.system_info'),
       description: t('dashboard.cta_system_desc'),
     },
@@ -228,9 +323,12 @@ export function DashboardPage() {
         <span className={styles.gridWash} />
       </div>
 
-      {/* ---------- Hero ---------- */}
+      {/* ---------- Command header ---------- */}
       <section className={styles.hero} ref={heroRef}>
         <div className={styles.heroCopy}>
+          <span className={styles.eyebrow} data-reveal>
+            {t('dashboard.command_eyebrow')}
+          </span>
           <h1 className={styles.heroTitle} data-reveal>
             {t(`dashboard.${verdict.key}`)}
             <span
@@ -243,6 +341,22 @@ export function DashboardPage() {
           <p className={styles.heroMeta} data-reveal>
             {heroMetaLine}
           </p>
+          {liveStatus && (
+            <p
+              className={`${styles.liveStatus} ${
+                liveStatus.tone === 'warning'
+                  ? styles.liveStatusWarning
+                  : liveStatus.tone === 'paused'
+                    ? styles.liveStatusPaused
+                    : ''
+              }`}
+              role="status"
+              data-reveal
+            >
+              <i className={styles.liveStatusDot} aria-hidden="true" />
+              {liveStatus.text}
+            </p>
+          )}
           <div className={styles.heroActions} data-reveal>
             <Link to="/ai-providers" className={styles.primaryAction}>
               {t('dashboard.cta_manage_providers')}
@@ -310,32 +424,169 @@ export function DashboardPage() {
         </div>
       </section>
 
-      {/* ---------- KPI ---------- */}
+      {/* ---------- Vitals ---------- */}
       <section className={styles.statsRow} ref={statsRef} aria-label={t('dashboard.stats_aria')}>
-        {statTiles.map((tile) => (
-          <article
-            key={tile.key}
-            className={styles.statTile}
-            data-reveal
-            style={
-              {
-                '--tile-accent': tile.tone ? TILE_ACCENTS[tile.tone] : 'var(--border-hover)',
-              } as React.CSSProperties
-            }
-          >
-            <span className={styles.statLabel}>{tile.label}</span>
-            <strong className={styles.statValue}>{tile.value}</strong>
-            {tile.meter !== null && tile.meter !== undefined && (
-              <Meter
-                value={tile.meter}
-                tone={tile.tone}
-                ariaLabel={tile.label}
-                className={styles.statMeter}
-              />
+        <article
+          className={`${styles.statTile} ${styles.statTileFeature}`}
+          data-reveal
+          style={{ '--tile-accent': TILE_ACCENTS[activeTone] } as React.CSSProperties}
+        >
+          <span className={styles.statLabel}>
+            {activeCount > 0 && <i className={styles.statLiveDot} aria-hidden="true" />}
+            {t('dashboard.vital_active')}
+          </span>
+          <strong className={styles.statValue}>
+            {accountsLoaded ? activeCount.toLocaleString() : DASH}
+            {accountsLoaded && (
+              <span className={styles.statUnit}>
+                {t('dashboard.vital_active_of', { total: activeTotal })}
+              </span>
             )}
-            <span className={styles.statHint}>{tile.hint}</span>
-          </article>
-        ))}
+          </strong>
+          {activeTotal > 0 && (
+            <span className={styles.dotStrip} aria-hidden="true">
+              {views.map((view) => (
+                <i
+                  key={view.source.key}
+                  className={
+                    view.live
+                      ? `${styles.stripDot} ${styles.stripDotLive}`
+                      : view.state === 'disabled'
+                        ? `${styles.stripDot} ${styles.stripDotOff}`
+                        : styles.stripDot
+                  }
+                />
+              ))}
+            </span>
+          )}
+          <span className={styles.statHint}>{t('dashboard.vital_active_hint')}</span>
+        </article>
+
+        <article
+          className={styles.statTile}
+          data-reveal
+          style={{ '--tile-accent': TILE_ACCENTS[successRateTone] } as React.CSSProperties}
+        >
+          <span className={styles.statLabel}>{t('dashboard.success_rate')}</span>
+          <strong className={styles.statValue}>
+            {traffic.successRate === null ? DASH : formatPercent(traffic.successRate)}
+          </strong>
+          {traffic.successRate !== null && (
+            <Meter
+              value={traffic.successRate}
+              tone={successRateTone}
+              ariaLabel={t('dashboard.success_rate')}
+              className={styles.statMeter}
+            />
+          )}
+          <span className={styles.statHint}>
+            {t('dashboard.stat_success_hint', { total: traffic.total.toLocaleString() })}
+          </span>
+        </article>
+
+        <article
+          className={styles.statTile}
+          data-reveal
+          style={{ '--tile-accent': TILE_ACCENTS[quotaTone] } as React.CSSProperties}
+        >
+          <span className={styles.statLabel}>{t('dashboard.vital_quota')}</span>
+          <strong className={styles.statValue}>
+            {headroom.tracked === 0 ? DASH : headroom.open.toLocaleString()}
+            {headroom.tracked > 0 && (
+              <span className={styles.statUnit}>
+                {t('dashboard.vital_quota_of', { total: headroom.tracked })}
+              </span>
+            )}
+          </strong>
+          {headroom.tracked > 0 && (
+            <span className={styles.quotaStrip} aria-hidden="true">
+              {views.map(({ source, quota }) => {
+                if (!quota) return null;
+                // Same language as the board's meters: the green fill is quota used.
+                const mostUsed = quota.windows.reduce(
+                  (max, window) => Math.max(max, window.usedPercent),
+                  0
+                );
+                return (
+                  <i
+                    key={source.key}
+                    className={`${styles.quotaCell} ${
+                      quota.health === 'error' ? styles.quotaCellFailed : ''
+                    }`}
+                  >
+                    <b className={styles.quotaCellFill} style={{ width: `${mostUsed}%` }} />
+                  </i>
+                );
+              })}
+            </span>
+          )}
+          <span className={styles.statHint}>{quotaHint}</span>
+        </article>
+
+        <article
+          className={styles.statTile}
+          data-reveal
+          style={
+            {
+              '--tile-accent': credentialsTone
+                ? TILE_ACCENTS[credentialsTone]
+                : 'var(--border-hover)',
+            } as React.CSSProperties
+          }
+        >
+          <span className={styles.statLabel}>{t('dashboard.stat_credentials')}</span>
+          <strong className={styles.statValue}>
+            {credentials ? credentials.total.toLocaleString() : DASH}
+          </strong>
+          {credentials && credentials.total > 0 && (
+            <Meter
+              value={(credentials.active / credentials.total) * 100}
+              tone={credentialsTone}
+              ariaLabel={t('dashboard.stat_credentials')}
+              className={styles.statMeter}
+            />
+          )}
+          <span className={styles.statHint}>
+            {credentials
+              ? t('dashboard.stat_credentials_hint', {
+                  active: credentials.active,
+                  disabled: credentials.disabled + credentials.unavailable,
+                })
+              : t('dashboard.stat_credentials_empty')}
+          </span>
+        </article>
+      </section>
+
+      {/* ---------- Account board ---------- */}
+      <section className={styles.section} ref={boardRef}>
+        <header className={styles.sectionHeadRow}>
+          <div className={styles.sectionHead}>
+            <span className={styles.eyebrow}>{t('dashboard.board_eyebrow')}</span>
+            <h2 className={styles.sectionTitle}>{t('dashboard.board_title')}</h2>
+            <p className={styles.sectionDescription}>{t('dashboard.board_description')}</p>
+          </div>
+          <Link to="/quota" className={styles.panelLink}>
+            {t('dashboard.board_open_quota')}{' '}
+            <span className={styles.linkArrow} aria-hidden="true">
+              →
+            </span>
+          </Link>
+        </header>
+        <AccountBoard
+          views={views}
+          loading={connected && authFiles === null}
+          filter={boardFilter}
+          counts={filterCounts}
+          onFilterChange={setBoardFilter}
+          maskNames={!showEmails}
+          onToggleMask={toggleEmails}
+          quotaRefreshing={quotaLoading}
+          canRefreshQuota={connected && headroom.tracked > 0}
+          onRefreshQuota={refreshQuota}
+          resolvedTheme={resolvedTheme}
+          nowMs={nowMs}
+          windowLabel={windowLabel}
+        />
       </section>
 
       {/* ---------- Traffic ---------- */}
@@ -357,7 +608,9 @@ export function DashboardPage() {
         <header className={styles.sectionHead}>
           <span className={styles.eyebrow}>{t('dashboard.fleet_eyebrow')}</span>
           <h2 className={styles.sectionTitle}>{t('dashboard.fleet_title')}</h2>
-          <p className={styles.sectionDescription}>{t('dashboard.fleet_description')}</p>
+          <p className={styles.sectionDescription}>
+            {t('dashboard.fleet_description_window', { window: windowLabel })}
+          </p>
         </header>
         <div className={styles.panel}>
           {providers.length === 0 ? (
@@ -386,7 +639,11 @@ export function DashboardPage() {
                   />
                   <div className={styles.fleetNumbers}>
                     <span className={styles.fleetTotal}>{provider.total.toLocaleString()}</span>
-                    <span className={styles.fleetTotalLabel}>{t('dashboard.fleet_requests')}</span>
+                    <span className={styles.fleetTotalLabel}>
+                      {t('dashboard.fleet_lifetime', {
+                        value: provider.lifetimeTotal.toLocaleString(),
+                      })}
+                    </span>
                   </div>
                   <div className={styles.fleetRate}>
                     <span className={styles.fleetRateValue}>
@@ -517,24 +774,31 @@ export function DashboardPage() {
         </div>
       </section>
 
-      {/* ---------- CTA ---------- */}
+      {/* ---------- Jump to ---------- */}
       <section className={styles.section} ref={ctaRef}>
         <header className={styles.sectionHead} data-reveal>
           <span className={styles.eyebrow}>{t('dashboard.cta_eyebrow')}</span>
-          <h2 className={styles.sectionTitle}>{t('dashboard.cta_title')}</h2>
         </header>
-        <div className={styles.ctaGrid}>
+        <nav className={styles.ctaGrid} aria-label={t('dashboard.cta_title')}>
           {ctaCards.map((card) => (
-            <Link key={card.to} to={card.to} className={styles.ctaCard} data-reveal>
+            <Link
+              key={card.to}
+              to={card.to}
+              className={styles.ctaCard}
+              title={card.description}
+              data-reveal
+            >
               <span className={styles.ctaIcon}>{card.icon}</span>
-              <span className={styles.ctaTitle}>{card.title}</span>
-              <span className={styles.ctaDescription}>{card.description}</span>
+              <span className={styles.ctaText}>
+                <span className={styles.ctaTitle}>{card.title}</span>
+                <span className={styles.ctaDescription}>{card.description}</span>
+              </span>
               <span className={styles.ctaArrow} aria-hidden="true">
                 →
               </span>
             </Link>
           ))}
-        </div>
+        </nav>
       </section>
     </div>
   );
