@@ -415,13 +415,13 @@ test('OpenAI rejects repeated sourceIndex without writing', async () => {
 });
 
 for (const inherited of [false, true]) {
-  test(`credential edits preserve auth-index headers (inherited=${inherited})`, async () => {
-    const headers = { 'auth-index': 'request-header', Other: 'before' };
+  test(`credential edits preserve auth_index headers (inherited=${inherited})`, async () => {
+    const headers = { auth_index: 'request-header', Other: 'before' };
     const key = {
       'api-key': 'fixture',
-      'auth-index': 'response-metadata',
+      auth_index: 'response-metadata',
       headers: inherited ? null : headers,
-      models: [{ name: 'model', alias: 'before', 'auth-index': 'opaque-model-field' }],
+      models: [{ name: 'model', alias: 'before', auth_index: 'opaque-model-field' }],
     };
     const group = { name: 'team', ...(inherited ? { headers } : {}), keys: [key] };
     const b = backend('codex', [group]);
@@ -444,12 +444,12 @@ for (const inherited of [false, true]) {
   });
 }
 
-test('OpenAI group headers retain auth-index while edited credentials drop response metadata', async () => {
+test('OpenAI group headers retain auth_index while edited credentials drop response metadata', async () => {
   const group = {
     name: 'compat',
     'base-url': 'https://example.invalid',
-    headers: { 'auth-index': 'request-header', Other: 'before' },
-    keys: [{ 'api-key': 'fixture', 'auth-index': 'response-metadata', custom: 'keep' }],
+    headers: { auth_index: 'request-header', Other: 'before' },
+    keys: [{ 'api-key': 'fixture', auth_index: 'response-metadata', custom: 'keep' }],
   };
   const b = backend('openai-compatibility', [group]);
   const current = (await providersApi.getOpenAIProviders())[0];
@@ -463,4 +463,22 @@ test('OpenAI group headers retain auth-index while edited credentials drop respo
     headers: { ...group.headers, Other: 'after' },
     keys: [{ 'api-key': 'fixture', custom: 'keep', weight: 2 }],
   });
+});
+
+test('reads auth_index injected by v8 GET /config for keys and keyless OpenAI groups', async () => {
+  // Backend config_auth_index.go injects underscore auth_index into api-keys entries.
+  const keyed = rows([{ name: 'team', keys: [{ 'api-key': 'fixture', auth_index: 'codex:1' }] }]);
+  expect(keyed[0].authIndex).toBe('codex:1');
+
+  backend('openai-compatibility', [
+    {
+      name: 'compat',
+      'base-url': 'https://example.invalid',
+      auth_index: 'openai-compatibility:compat',
+      keys: [{ 'api-key': 'fixture', auth_index: 'openai-compatibility:compat:1' }],
+    },
+  ]);
+  const [provider] = await providersApi.getOpenAIProviders();
+  expect(provider.authIndex).toBe('openai-compatibility:compat');
+  expect(provider.apiKeyEntries[0].authIndex).toBe('openai-compatibility:compat:1');
 });

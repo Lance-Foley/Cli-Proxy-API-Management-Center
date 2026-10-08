@@ -13,6 +13,8 @@ import {
   windowsIn,
 } from '../src/features/quota/quotaTimelineModel';
 import type { TimelineLane } from '../src/features/quota/quotaTimelineModel';
+import { buildClaudeQuotaWindows } from '../src/features/quota/providers/claude/data';
+import { parseClaudeUsagePayload } from '../src/utils/quota';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m, d, h, min).getTime();
 
@@ -314,6 +316,85 @@ describe('buildTimelineLane', () => {
     expect(lane.remaining).toBe(30);
   });
 
+  describe('claude: the weekly lane stays on the account-wide 7-day limit', () => {
+    // Values from a real ledger: 5h 28%, 7-day 93%, 7-day Fable 5 0%. Anthropic's
+    // `resets_at` carries fractional seconds, so the model-scoped window can reset a
+    // few hundred milliseconds "sooner" and used to win the reset-time tie-break.
+    const fiveHourReset = at(2026, 9, 8, 18, 40);
+    const weeklyReset = at(2026, 9, 10, 18, 0) + 400;
+    const fableReset = at(2026, 9, 10, 18, 0) + 100;
+    const windows = [
+      {
+        id: 'five-hour',
+        label: '5-hour limit',
+        usedPercent: 28,
+        resetAtMs: fiveHourReset,
+        periodHours: 5,
+      },
+      {
+        id: 'seven-day',
+        label: '7-day limit',
+        usedPercent: 93,
+        resetAtMs: weeklyReset,
+        periodHours: 168,
+      },
+      {
+        id: 'seven-day-fable',
+        label: '7-day Fable 5',
+        usedPercent: 0,
+        resetAtMs: fableReset,
+        periodHours: 168,
+      },
+    ];
+
+    test('a model-scoped window resetting a moment earlier does not take the lane', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: { status: 'success', windows },
+        maxPeriodHours: 14 * 24,
+      });
+      expect(lane.anchorMs).toBe(weeklyReset);
+      expect(lane.periodHours).toBe(168);
+      expect(lane.remaining).toBe(7);
+    });
+
+    test('nor does one listed first with an identical reset', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: {
+          status: 'success',
+          windows: [{ ...windows[2], resetAtMs: weeklyReset }, windows[1], windows[0]],
+        },
+        maxPeriodHours: 14 * 24,
+      });
+      expect(lane.remaining).toBe(7);
+    });
+
+    test('a model-scoped weekly window still anchors when it is the only one', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: { status: 'success', windows: [windows[0], windows[2]] },
+        maxPeriodHours: 14 * 24,
+      });
+      expect(lane.anchorMs).toBe(fableReset);
+      expect(lane.remaining).toBe(100);
+    });
+
+    test('the session view keeps the 5-hour window', () => {
+      const lane = buildTimelineLane({
+        ...base,
+        provider: 'claude',
+        quota: { status: 'success', windows },
+        maxPeriodHours: 3 * 24,
+      });
+      expect(lane.anchorMs).toBe(fiveHourReset);
+      expect(lane.remaining).toBe(72);
+    });
+  });
+
   test('codex: includes available reset credits with parseable expiry dates', () => {
     const expiresAt = '2026-08-02T12:00:00Z';
     const lane = buildTimelineLane({
@@ -518,5 +599,62 @@ describe('buildTimelineLane', () => {
       },
     });
     expect(lane.anchorMs).toBeNull();
+  });
+});
+
+describe('claude lane from a raw usage payload', () => {
+  // End to end: the JSON string the proxy hands back → parsed payload → card
+  // windows → lane. Microsecond stamps and the modern `limits` Fable entry are
+  // what the live API sends; Fable's stamp lands a fraction of a second earlier.
+  const t = ((key: string) => key) as Parameters<typeof buildClaudeQuotaWindows>[1];
+  const raw = (sevenDayReset: string | null) =>
+    JSON.stringify({
+      five_hour: { utilization: 36.0, resets_at: '2026-10-08T18:40:00.512341+00:00' },
+      seven_day: { utilization: 95.0, resets_at: sevenDayReset },
+      seven_day_oauth_apps: null,
+      seven_day_opus: null,
+      seven_day_sonnet: null,
+      iguana_necktie: null,
+      limits: [
+        {
+          kind: 'weekly_scoped',
+          group: 'weekly',
+          percent: 0,
+          resets_at: '2026-10-10T18:00:00.112233+00:00',
+          is_active: true,
+          scope: { model: { id: null, display_name: 'Fable' } },
+        },
+      ],
+      extra_usage: null,
+    });
+  const laneFor = (body: string, maxPeriodHours: number) =>
+    buildTimelineLane({
+      name: 'claude-a.json',
+      displayName: 'claude-a.json',
+      provider: 'claude',
+      quota: {
+        status: 'success',
+        windows: buildClaudeQuotaWindows(parseClaudeUsagePayload(body)!, t),
+      } as { status: string },
+      maxPeriodHours,
+    });
+
+  test('weekly view draws the 7-day limit the ledger shows', () => {
+    const lane = laneFor(raw('2026-10-10T18:00:00.871254+00:00'), 14 * 24);
+    expect(lane.remaining).toBe(5); // 95% used, as in the ledger
+    expect(lane.anchorMs).toBe(Date.parse('2026-10-10T18:00:00.871254+00:00'));
+    expect(lane.scopeLabel).toBe(null);
+  });
+
+  test('5-hour view draws the 5-hour limit the ledger shows', () => {
+    const lane = laneFor(raw('2026-10-10T18:00:00.871254+00:00'), 5);
+    expect(lane.periodHours).toBe(5);
+    expect(lane.remaining).toBe(64); // 36% used
+  });
+
+  test('a 7-day limit with no reset falls back to Fable and says so', () => {
+    const lane = laneFor(raw(null), 14 * 24);
+    expect(lane.remaining).toBe(100);
+    expect(lane.scopeLabel).toBe('claude_quota.seven_day_fable');
   });
 });

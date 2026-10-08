@@ -24,7 +24,7 @@ describe('Meta Muse API key provider', () => {
                 models: [{ name: 'muse-spark-1.3', alias: 'muse-latest' }],
                 'excluded-models': ['muse-spark-1.1'],
                 'disable-cooling': true,
-                'auth-index': 'meta:apikey:1',
+                auth_index: 'meta:apikey:1',
               },
             ],
           },

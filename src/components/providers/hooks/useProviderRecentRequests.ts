@@ -132,8 +132,7 @@ export function useProviderRecentRequests(options: UseProviderRecentRequestsOpti
       }
 
       const hasFreshCache =
-        cache.cachedAt > 0 &&
-        Date.now() - cache.cachedAt < PROVIDER_RECENT_REQUESTS_STALE_TIME_MS;
+        cache.cachedAt > 0 && Date.now() - cache.cachedAt < PROVIDER_RECENT_REQUESTS_STALE_TIME_MS;
 
       if (!loadOptions.force && hasFreshCache) {
         setUsageForCurrentScope(cache.cachedUsageByProvider);
@@ -179,11 +178,15 @@ export function useProviderRecentRequests(options: UseProviderRecentRequestsOpti
 
   const usageByProvider =
     usageState.cache === cache ? usageState.value : cache.cachedUsageByProvider;
+  // When the data shown was fetched; 0 until the first response. A cached map can
+  // be minutes old, which matters to anything that reasons about recency.
+  const fetchedAtMs = cache.cachedUsageByProvider === usageByProvider ? cache.cachedAt : 0;
   const isLoading =
     loadingState.cache === cache ? loadingState.value : cache.inFlightRequest !== null;
 
   return {
     usageByProvider: enabled ? usageByProvider : EMPTY_USAGE_BY_PROVIDER,
+    fetchedAtMs: enabled ? fetchedAtMs : 0,
     isLoading: enabled ? isLoading : false,
     loadRecentRequests,
     refreshRecentRequests,

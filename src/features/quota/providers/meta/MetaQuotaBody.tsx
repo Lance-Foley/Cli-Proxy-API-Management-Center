@@ -39,7 +39,10 @@ export function MetaQuotaBody({ quota, classes }: QuotaBodyProps<MetaQuotaState>
         <div className={classes.quotaMessage}>{t('meta_quota.empty_data')}</div>
       )}
       {data.windows.map((window, index) => {
-        const remaining = window.usedPercent === null ? null : 100 - window.usedPercent;
+        const used =
+          window.usedPercent === null
+            ? null
+            : Math.max(0, Math.min(100, Math.round(window.usedPercent)));
         const resetDisplay = buildResetDisplay(
           null,
           window.resetAt === undefined ? null : window.resetAt * 1000,
@@ -57,9 +60,7 @@ export function MetaQuotaBody({ quota, classes }: QuotaBodyProps<MetaQuotaState>
               <span className={classes.quotaModel}>{label}</span>
               <div className={classes.quotaMeta}>
                 <span className={classes.quotaPercent}>
-                  {remaining === null
-                    ? t('meta_quota.unknown')
-                    : t('meta_quota.remaining', { percent: Number(remaining.toFixed(1)) })}
+                  {used === null ? t('meta_quota.unknown') : `${used}%`}
                 </span>
                 {resetDisplay && (
                   <QuotaResetLabel display={resetDisplay} classes={classes} soon={soon} />
@@ -67,13 +68,13 @@ export function MetaQuotaBody({ quota, classes }: QuotaBodyProps<MetaQuotaState>
               </div>
             </div>
             <div
-              role={remaining === null ? undefined : 'meter'}
-              aria-label={remaining === null ? undefined : label}
-              aria-valuemin={remaining === null ? undefined : 0}
-              aria-valuemax={remaining === null ? undefined : 100}
-              aria-valuenow={remaining ?? undefined}
+              role={used === null ? undefined : 'meter'}
+              aria-label={used === null ? undefined : label}
+              aria-valuemin={used === null ? undefined : 0}
+              aria-valuemax={used === null ? undefined : 100}
+              aria-valuenow={used ?? undefined}
             >
-              <QuotaMeter percent={remaining} classes={classes} index={index} />
+              <QuotaMeter percent={used} classes={classes} index={index} />
             </div>
           </div>
         );

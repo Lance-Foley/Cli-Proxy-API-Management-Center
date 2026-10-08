@@ -31,13 +31,13 @@ export function KimiQuotaBody({ quota, classes }: QuotaBodyProps<KimiQuotaState>
       {rows.map((row, index) => {
         const limit = row.limit;
         const used = row.used;
-        const remaining =
+        const usedPercent =
           limit > 0
-            ? Math.max(0, Math.min(100, Math.round(((limit - used) / limit) * 100)))
+            ? Math.max(0, Math.min(100, Math.round((used / limit) * 100)))
             : used > 0
-              ? 0
+              ? 100
               : null;
-        const percentLabel = remaining === null ? '--' : `${remaining}%`;
+        const percentLabel = usedPercent === null ? '--' : `${usedPercent}%`;
         const rowLabel = row.labelKey
           ? t(row.labelKey, (row.labelParams ?? {}) as Record<string, string | number>)
           : (row.label ?? '');
@@ -64,7 +64,7 @@ export function KimiQuotaBody({ quota, classes }: QuotaBodyProps<KimiQuotaState>
                 )}
               </div>
             </div>
-            <QuotaMeter percent={remaining} classes={classes} index={index} />
+            <QuotaMeter percent={usedPercent} classes={classes} index={index} />
           </div>
         );
       })}

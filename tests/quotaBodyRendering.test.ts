@@ -256,5 +256,14 @@ describe('ClaudeQuotaBody', () => {
     expect(markup).toContain('08-06 04:00');
     expect(markup).toMatch(/2 hours/);
     expect(markup).toMatch(/4 days/);
+    expect(markup).toContain('>12%<');
+    expect(markup).toContain('>60%<');
+    expect(markup).toContain('width:12%');
+    expect(markup).toContain('width:60%');
+    expect(markup).toContain('quotaBarFillHigh');
+    expect(markup).not.toContain('quotaBarFillMedium');
+    expect(markup).not.toContain('quotaBarFillLow');
+    expect(markup).not.toContain('>88%<');
+    expect(markup).not.toContain('>40%<');
   });
 });

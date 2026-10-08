@@ -22,7 +22,7 @@ describe('xAI API key provider', () => {
                 models: [{ name: 'grok-4.5', alias: 'grok-latest' }],
                 'excluded-models': ['grok-3-*'],
                 'disable-cooling': true,
-                'auth-index': 'xai:apikey:1',
+                auth_index: 'xai:apikey:1',
               },
             ],
           },

@@ -46,6 +46,7 @@ const normalizeMappingEntries = (
     alias: entry.alias ?? '',
     fork: Boolean(entry.fork),
     forceMapping: entry.forceMapping,
+    displayName: entry.displayName,
   }));
 };
 
@@ -357,6 +358,7 @@ export function AuthFilesOAuthModelAliasEditPage() {
         if (typeof entry.forceMapping === 'boolean') {
           normalizedEntry.forceMapping = entry.forceMapping;
         }
+        if (entry.displayName) normalizedEntry.displayName = entry.displayName;
         return normalizedEntry;
       })
       .filter(Boolean) as OAuthModelAliasEntry[];

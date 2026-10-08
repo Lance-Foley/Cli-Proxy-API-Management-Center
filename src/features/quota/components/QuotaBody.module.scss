@@ -24,11 +24,13 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 2px 12px;
   min-width: 0;
 }
 
 .quotaModel {
+  flex: 1 1 9rem;
   min-width: 0;
   font-size: 12.5px;
   font-weight: 600;
@@ -40,10 +42,12 @@
 .quotaMeta {
   display: inline-flex;
   align-items: baseline;
-  gap: 7px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 7px;
+  max-width: 100%;
   font-family: $font-mono;
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
 }
@@ -92,11 +96,11 @@
 }
 
 /* ---------- 水位条（QuotaMeter）----------
- * 轨道退居背景（8% 墨色），填充按剩余量三档着色；
- * percent === null 时宽度为 0 —— 未知不着色。 */
+ * 轨道退居背景。填充始终为绿色，宽度是已用份额。
+ * percent === null 时宽度为 0。 */
 
 .quotaBar {
-  height: 6px;
+  height: 8px;
   border-radius: $radius-full;
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
   overflow: hidden;

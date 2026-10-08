@@ -13,6 +13,7 @@ import { IconRefreshCw } from '@/components/ui/icons';
 import type { ResolvedTheme } from '@/types';
 import { resolveQuotaErrorMessage } from '@/utils/quota';
 import { getQuotaDisplayName } from '@/utils/quota/identity';
+import { maskCredentialName } from '@/utils/quota/maskName';
 import {
   getAuthFileIcon,
   getThemeSurfaceIconBackground,
@@ -35,6 +36,12 @@ export type QuotaCardProps = {
   resolvedTheme: ResolvedTheme;
   canRefresh: boolean;
   resetting: boolean;
+  /** `row` = one ledger row with stacked limits; `card` = the boxed grid card. */
+  variant?: 'card' | 'row';
+  /** Inspector copy: no lift on hover. The roster already shows which row is open. */
+  quiet?: boolean;
+  /** Hide the email inside the credential filename (screen sharing). */
+  maskNames?: boolean;
   /** 首屏级联入场延迟；null = 不入场（切 tab / 翻页 / 刷新新挂载的卡片）。 */
   entranceDelayMs?: number | null;
   onRefresh: () => void;
@@ -48,6 +55,9 @@ export function QuotaCard(props: QuotaCardProps) {
     resolvedTheme,
     canRefresh,
     resetting,
+    variant = 'card',
+    quiet = false,
+    maskNames = false,
     entranceDelayMs,
     onRefresh,
     onReset,
@@ -55,7 +65,9 @@ export function QuotaCard(props: QuotaCardProps) {
   const { t } = useTranslation();
   const adapter = QUOTA_ADAPTERS[entry.type];
   const file = entry.file;
-  const displayName = getQuotaDisplayName(file);
+  const displayName = maskNames
+    ? maskCredentialName(getQuotaDisplayName(file))
+    : getQuotaDisplayName(file);
 
   // 挂载时捕获一次延迟：后续 props 变 null 不影响本卡（React 19 禁渲染期读 ref）
   const [mountEntranceDelayMs] = useState<number | null>(entranceDelayMs ?? null);
@@ -88,7 +100,9 @@ export function QuotaCard(props: QuotaCardProps) {
 
   return (
     <article
-      className={`${styles.card} ${mountEntranceDelayMs === null ? '' : styles.cardEnter}`}
+      className={`${styles.card} ${quiet ? styles.quiet : ''} ${variant === 'row' ? styles.row : ''} ${
+        mountEntranceDelayMs === null ? '' : styles.cardEnter
+      }`}
       style={entranceStyle}
     >
       <header className={styles.head}>

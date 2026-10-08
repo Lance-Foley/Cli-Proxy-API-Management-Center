@@ -21,26 +21,18 @@ const formatUsdFromCents = (cents: number | null): string => {
   }).format(cents / 100);
 };
 
-const formatXaiRemainingAmount = (billing: XaiBillingSummary): string => {
-  const remainingCents =
-    billing.monthlyLimitCents !== null && billing.includedUsedCents !== null
-      ? Math.max(0, billing.monthlyLimitCents - billing.includedUsedCents)
-      : null;
-  const remaining = formatUsdFromCents(remainingCents);
+const formatXaiUsedAmount = (billing: XaiBillingSummary): string => {
+  const used = formatUsdFromCents(billing.includedUsedCents);
   const limit = formatUsdFromCents(billing.monthlyLimitCents);
-  if (billing.monthlyLimitCents === null) return remaining;
-  return `${remaining} / ${limit}`;
+  if (billing.monthlyLimitCents === null) return used;
+  return `${used} / ${limit}`;
 };
 
 const formatXaiOnDemandAmount = (billing: XaiBillingSummary): string => {
-  const remainingCents =
-    billing.onDemandCapCents !== null && billing.onDemandUsedCents !== null
-      ? Math.max(0, billing.onDemandCapCents - billing.onDemandUsedCents)
-      : null;
-  const remaining = formatUsdFromCents(remainingCents);
+  const used = formatUsdFromCents(billing.onDemandUsedCents);
   const cap = formatUsdFromCents(billing.onDemandCapCents);
-  if (billing.onDemandCapCents === null) return remaining;
-  return `${remaining} / ${cap}`;
+  if (billing.onDemandCapCents === null) return used;
+  return `${used} / ${cap}`;
 };
 
 const formatXaiPercent = (value: number | null): string => {
@@ -111,9 +103,8 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
 
   const clampedUsed =
     billing.usedPercent === null ? null : Math.max(0, Math.min(100, billing.usedPercent));
-  const remaining = clampedUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedUsed));
-  const percentLabel = formatXaiPercent(remaining);
-  const amountLabel = formatXaiRemainingAmount(billing);
+  const percentLabel = formatXaiPercent(clampedUsed);
+  const amountLabel = formatXaiUsedAmount(billing);
   const resetLabel = formatQuotaResetTime(billing.billingPeriodEnd);
   // The monthly row is a billing cycle, so it carries no resetAtMs (that field
   // is derived from periodEnd, the weekly quota window). Parse for the
@@ -129,16 +120,13 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
     billing.onDemandUsedPercent === null
       ? null
       : Math.max(0, Math.min(100, billing.onDemandUsedPercent));
-  const onDemandRemaining =
-    clampedOnDemandUsed === null ? null : Math.max(0, Math.min(100, 100 - clampedOnDemandUsed));
-  const onDemandPercentLabel = formatXaiPercent(onDemandRemaining);
+  const onDemandPercentLabel = formatXaiPercent(clampedOnDemandUsed);
   const onDemandAmountLabel = formatXaiOnDemandAmount(billing);
   const plan = resolveXaiPlan(billing.monthlyLimitCents);
   const weeklyUsed =
     billing.periodType === 'weekly' && billing.usagePercent !== null
       ? Math.max(0, Math.min(100, billing.usagePercent))
       : null;
-  const weeklyRemaining = weeklyUsed === null ? null : Math.max(0, Math.min(100, 100 - weeklyUsed));
   const weeklyResetLabel = formatQuotaResetTime(billing.periodEnd);
   const weeklyResetDisplay = buildResetDisplay(
     weeklyResetLabel === '-' ? null : t('xai_quota.reset_at', { time: weeklyResetLabel }),
@@ -215,15 +203,12 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
               )}
             </div>
           </div>
-          {weeklyRemaining !== null && (
-            <QuotaMeter percent={weeklyRemaining} classes={classes} index={0} />
-          )}
+          {weeklyUsed !== null && <QuotaMeter percent={weeklyUsed} classes={classes} index={0} />}
         </div>
       )}
       {billing.productUsage.map((item, index) => {
         const used =
           item.usagePercent === null ? null : Math.max(0, Math.min(100, item.usagePercent));
-        const remainingPercent = used === null ? null : Math.max(0, Math.min(100, 100 - used));
         return (
           <div key={`product-${item.product}`} className={classes.quotaRow}>
             <div className={classes.quotaRowHeader}>
@@ -238,7 +223,7 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
                 </span>
               </div>
             </div>
-            <QuotaMeter percent={remainingPercent} classes={classes} index={index + 1} />
+            <QuotaMeter percent={used} classes={classes} index={index + 1} />
           </div>
         );
       })}
@@ -252,7 +237,7 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
             </div>
           </div>
           <QuotaMeter
-            percent={onDemandRemaining}
+            percent={clampedOnDemandUsed}
             classes={classes}
             index={billing.productUsage.length + 1}
           />
@@ -276,7 +261,7 @@ export function XaiQuotaBody({ quota, classes }: QuotaBodyProps<XaiQuotaState>) 
             </div>
           </div>
           <QuotaMeter
-            percent={remaining}
+            percent={clampedUsed}
             classes={classes}
             index={billing.productUsage.length + 2}
           />

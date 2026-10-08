@@ -28,7 +28,7 @@ export interface OAuthCancelResponse {
   cancelled: boolean;
 }
 
-const WEBUI_SUPPORTED = new Set<string>(['codex', 'claude', 'antigravity', 'xai', 'devin']);
+const WEBUI_SUPPORTED = new Set<string>(['codex', 'claude', 'antigravity', 'devin']);
 
 const normalizeProviderForManagementPath = (provider: string): string => {
   const key = normalizeManagementOAuthProviderKey(provider);

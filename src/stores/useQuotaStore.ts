@@ -19,6 +19,12 @@ type QuotaUpdater<T> = T | ((prev: T) => T);
 interface QuotaStoreState {
   cacheGeneration: number;
   fileGenerations: Record<string, number>;
+  /**
+   * Cache key → when its quota was last requested or settled. Drives auto-refresh;
+   * stamping the request (not only the result) keeps two pages from fetching the
+   * same account at once and stops a failed commit from retrying in a hot loop.
+   */
+  fetchedAtByKey: Record<string, number>;
   antigravityQuota: Record<string, AntigravityQuotaState>;
   claudeQuota: Record<string, ClaudeQuotaState>;
   codexQuota: Record<string, CodexQuotaState>;
@@ -33,6 +39,9 @@ interface QuotaStoreState {
   setKimiQuota: (updater: QuotaUpdater<Record<string, KimiQuotaState>>) => void;
   setMetaQuota: (updater: QuotaUpdater<Record<string, MetaQuotaState>>) => void;
   setXaiQuota: (updater: QuotaUpdater<Record<string, XaiQuotaState>>) => void;
+  markQuotaFetched: (keys: string[], atMs: number) => void;
+  /** Forget fetch times for keys that are no longer listed. */
+  pruneQuotaFetches: (survivors: ReadonlySet<string>) => void;
   clearQuotaCache: (names?: string[]) => void;
 }
 
@@ -46,6 +55,7 @@ const resolveUpdater = <T>(updater: QuotaUpdater<T>, prev: T): T => {
 export const useQuotaStore = create<QuotaStoreState>((set) => ({
   cacheGeneration: 0,
   fileGenerations: {},
+  fetchedAtByKey: {},
   antigravityQuota: {},
   claudeQuota: {},
   codexQuota: {},
@@ -79,6 +89,23 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
     set((state) => ({
       xaiQuota: resolveUpdater(updater, state.xaiQuota),
     })),
+  markQuotaFetched: (keys, atMs) =>
+    set((state) => {
+      if (keys.length === 0) return state;
+      const fetchedAtByKey = { ...state.fetchedAtByKey };
+      keys.forEach((key) => {
+        fetchedAtByKey[key] = atMs;
+      });
+      return { fetchedAtByKey };
+    }),
+  pruneQuotaFetches: (survivors) =>
+    set((state) => {
+      const stale = Object.keys(state.fetchedAtByKey).filter((key) => !survivors.has(key));
+      if (stale.length === 0) return state;
+      const fetchedAtByKey = { ...state.fetchedAtByKey };
+      stale.forEach((key) => delete fetchedAtByKey[key]);
+      return { fetchedAtByKey };
+    }),
   clearQuotaCache: (names) =>
     set((state) => {
       if (names) {
@@ -99,6 +126,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
         };
         return {
           fileGenerations,
+          fetchedAtByKey: omitNames(state.fetchedAtByKey),
           antigravityQuota: omitNames(state.antigravityQuota),
           claudeQuota: omitNames(state.claudeQuota),
           codexQuota: omitNames(state.codexQuota),
@@ -111,6 +139,7 @@ export const useQuotaStore = create<QuotaStoreState>((set) => ({
       return {
         cacheGeneration: state.cacheGeneration + 1,
         fileGenerations: {},
+        fetchedAtByKey: {},
         antigravityQuota: {},
         claudeQuota: {},
         codexQuota: {},

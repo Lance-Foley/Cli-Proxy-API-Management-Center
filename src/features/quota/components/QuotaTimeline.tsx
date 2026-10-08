@@ -1,7 +1,7 @@
 /**
  * Quota windows timeline.
  *
- * The cards answer "how much is left"; this answers "when does it come back,
+ * The cards answer "how much of the allowance is used"; this answers "when does it come back,
  * and does it all come back at once". Four credentials resetting the same
  * evening is a very different position from four staggered across a week, and
  * no per-card percentage shows that.
@@ -358,7 +358,7 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
           {lane.limits.map((limit) => (
             <span key={limit.label} className={styles.laneLimit}>
               {lane.provider === 'meta' ? t(limit.label) : limit.label}{' '}
-              <b>{limit.remaining}%</b>
+              <b>{Math.max(0, Math.min(100, Math.round(100 - limit.remaining)))}%</b>
             </span>
           ))}
         </div>
@@ -387,36 +387,40 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
           </span>
         ) : (
           windows.map((window) => {
-            // A label needs room to read; below that the bar speaks for itself
-            // and the detail lives in the tooltip.
-            const showLabel = window.widthPercent > (mode === 'session' ? 4.5 : 9);
+            // A label needs room to read. A short bar keeps the detail in the
+            // tooltip instead of clipping the date onto the fill.
+            const showLabel = window.widthPercent > (mode === 'session' ? 16 : 22);
             const endText =
               mode === 'session'
                 ? formatTime(window.endMs)
                 : `${formatDay(window.endMs)} ${formatTime(window.endMs)}`;
+
+            const used =
+              window.remaining === null
+                ? null
+                : Math.max(0, Math.min(100, Math.round(100 - window.remaining)));
 
             return (
               <div
                 key={window.startMs}
                 className={`${styles.window} ${styles[`window${capitalize(window.state)}`]}`}
                 style={{ left: `${window.leftPercent}%`, width: `${window.widthPercent}%` }}
-                title={`${lane.displayName}\n${formatDay(window.startMs)} ${formatTime(
+                title={`${lane.displayName}${lane.scopeLabel ? ` · ${lane.scopeLabel}` : ''}\n${formatDay(
                   window.startMs
-                )} → ${formatDay(window.endMs)} ${formatTime(window.endMs)}${
-                  window.remaining !== null ? `\n${window.remaining}% remaining` : ''
-                }`}
+                )} ${formatTime(window.startMs)} → ${formatDay(window.endMs)} ${formatTime(
+                  window.endMs
+                )}${used !== null ? `\n${used}% used` : ''}`}
               >
                 {/* Only the API-reported current window has meaningful usage;
                     projected windows intentionally have no fill. */}
-                {window.remaining !== null && (
-                  <span
-                    className={styles.windowFill}
-                    style={{ width: `${100 - window.remaining}%` }}
-                  />
+                {used !== null && (
+                  <span className={styles.windowFill} style={{ width: `${used}%` }} />
                 )}
                 {showLabel && (
                   <span className={styles.windowLabel}>
-                    {window.remaining !== null ? `${window.remaining}% · ` : ''}
+                    {/* Name a stand-in window so its number is never read as the account's. */}
+                    {used !== null && lane.scopeLabel ? `${lane.scopeLabel} ` : ''}
+                    {used !== null ? `${used}% · ` : ''}
                     {endText}
                   </span>
                 )}

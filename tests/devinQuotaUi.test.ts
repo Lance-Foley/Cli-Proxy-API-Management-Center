@@ -59,17 +59,18 @@ describe('Devin quota UI integration', () => {
     expect(buildTabCounts(entries).devin).toBe(1);
   });
 
-  test('renders both remaining meters, independent resets and plan without observation time', () => {
+  test('renders both used meters, independent resets and plan without observation time', () => {
     const markup = renderToStaticMarkup(
       createElement(DevinQuotaBody, { quota: snapshot(), classes })
     );
     expect(markup).toContain(i18n.t('devin_quota.daily'));
     expect(markup).toContain(i18n.t('devin_quota.weekly'));
     expect(markup.match(/role="meter"/g)).toHaveLength(2);
-    expect(markup).toContain('aria-valuenow="0"');
-    expect(markup).toContain('aria-valuenow="80"');
-    expect(markup).toContain('width:0%');
-    expect(markup).toContain('width:80%');
+    expect(markup).toContain('aria-valuenow="100"');
+    expect(markup).toContain('aria-valuenow="20"');
+    expect(markup).toContain('width:100%');
+    expect(markup).toContain('width:20%');
+    expect(markup).not.toContain('width:80%');
     expect(markup).toContain('Pro');
     expect(markup).toContain('01/02');
     expect(markup).toContain('01/08');
