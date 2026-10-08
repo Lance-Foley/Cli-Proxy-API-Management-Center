@@ -35,7 +35,7 @@ describe('Interactions API key provider', () => {
                 ],
                 'excluded-models': ['gemini-2.5-*'],
                 'disable-cooling': true,
-                'auth-index': 'gemini-interactions:apikey:1',
+                auth_index: 'gemini-interactions:apikey:1',
               },
             ],
           },

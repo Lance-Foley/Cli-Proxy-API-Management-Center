@@ -136,8 +136,7 @@ const PROVIDERS: BuiltInOAuthProviderCard[] = [
 ];
 
 const BUILTIN_PROVIDER_IDS = new Set<string>(PROVIDERS.map((provider) => provider.id));
-const CALLBACK_SUPPORTED = new Set<string>(['codex', 'anthropic', 'antigravity', 'xai', 'devin']);
-const XAI_CALLBACK_URL = 'http://127.0.0.1:56121/callback';
+const CALLBACK_SUPPORTED = new Set<string>(['codex', 'anthropic', 'antigravity', 'devin']);
 const SUCCESS_RESET_DELAY_MS = 5000;
 const getProviderI18nPrefix = (provider: string) => provider.replace('-', '_');
 const getAuthKey = (provider: string, suffix: string) =>
@@ -199,73 +198,6 @@ const buildPluginOAuthProviderCards = (
       },
     ];
   });
-};
-
-const isAbsoluteUrl = (value: string): boolean => {
-  try {
-    new URL(value);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const readQueryLikeCallbackInput = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const queryStart = trimmed.indexOf('?');
-  const hashStart = trimmed.indexOf('#');
-  const rawParams =
-    queryStart >= 0
-      ? trimmed.slice(queryStart + 1)
-      : hashStart >= 0
-        ? trimmed.slice(hashStart + 1)
-        : trimmed;
-
-  if (!/(^|[&#?])(code|state|error)=/i.test(rawParams)) return null;
-  return new URLSearchParams(rawParams.replace(/^[?#]/, ''));
-};
-
-const extractDisplayedXaiCode = (value: string): string => {
-  const trimmed = value.trim();
-  const codeMatch = trimmed.match(/\bcode\s*[:=]\s*([^\s&]+)/i);
-  return (codeMatch?.[1] ?? trimmed).trim();
-};
-
-const buildXaiCallbackUrl = (input: string, state?: string): string | null => {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  if (isAbsoluteUrl(trimmed)) return trimmed;
-
-  const params = readQueryLikeCallbackInput(trimmed);
-  if (params) {
-    const code = params.get('code')?.trim();
-    const error = params.get('error')?.trim();
-    const errorDescription = params.get('error_description')?.trim();
-    const callbackState = params.get('state')?.trim() || state?.trim();
-    if (!callbackState) return null;
-
-    const callbackUrl = new URL(XAI_CALLBACK_URL);
-    callbackUrl.searchParams.set('state', callbackState);
-    if (code) callbackUrl.searchParams.set('code', code);
-    if (error) callbackUrl.searchParams.set('error', error);
-    if (errorDescription) callbackUrl.searchParams.set('error_description', errorDescription);
-    return callbackUrl.toString();
-  }
-
-  const code = extractDisplayedXaiCode(trimmed);
-  const callbackState = state?.trim();
-  if (!code || !callbackState) return null;
-
-  const callbackUrl = new URL(XAI_CALLBACK_URL);
-  callbackUrl.searchParams.set('code', code);
-  callbackUrl.searchParams.set('state', callbackState);
-  return callbackUrl.toString();
-};
-
-const resolveCallbackUrl = (provider: string, input: string, state?: string): string | null => {
-  if (provider !== 'xai') return input.trim();
-  return buildXaiCallbackUrl(input, state);
 };
 
 export function OAuthPage() {
@@ -543,14 +475,7 @@ export function OAuthPage() {
     }
     const callbackInput = (states[provider]?.callbackUrl || '').trim();
     if (!callbackInput) {
-      showNotification(
-        t(
-          provider === 'xai'
-            ? 'auth_login.xai_callback_required'
-            : 'auth_login.oauth_callback_required'
-        ),
-        'warning'
-      );
+      showNotification(t('auth_login.oauth_callback_required'), 'warning');
       return;
     }
     if (provider === 'devin') {
@@ -560,23 +485,13 @@ export function OAuthPage() {
         return;
       }
     }
-    const redirectUrl = resolveCallbackUrl(provider, callbackInput, states[provider]?.state);
-    if (!redirectUrl) {
-      showNotification(
-        t(
-          provider === 'xai' ? 'auth_login.xai_callback_state_missing' : 'auth_login.missing_state'
-        ),
-        'warning'
-      );
-      return;
-    }
     updateProviderState(provider, {
       callbackSubmitting: true,
       callbackStatus: undefined,
       callbackError: undefined,
     });
     try {
-      await oauthApi.submitCallback(provider, redirectUrl, attempt.signal);
+      await oauthApi.submitCallback(provider, callbackInput, attempt.signal);
       if (!attempt.isCurrent()) return;
       updateProviderState(provider, { callbackSubmitting: false, callbackStatus: 'success' });
       showNotification(t('auth_login.oauth_callback_success'), 'success');
@@ -776,17 +691,11 @@ export function OAuthPage() {
           {canSubmitCallback && (
             <div className={styles.callbackSection}>
               <Input
-                label={t(
-                  provider.id === 'xai'
-                    ? 'auth_login.xai_callback_label'
-                    : 'auth_login.oauth_callback_label'
-                )}
+                label={t('auth_login.oauth_callback_label')}
                 hint={t(
-                  provider.id === 'xai'
-                    ? 'auth_login.xai_callback_hint'
-                    : provider.id === 'devin'
-                      ? 'auth_login.devin_callback_hint'
-                      : 'auth_login.oauth_callback_hint'
+                  provider.id === 'devin'
+                    ? 'auth_login.devin_callback_hint'
+                    : 'auth_login.oauth_callback_hint'
                 )}
                 disabled={
                   provider.id === 'devin' && (state.cancelling || state.status !== 'waiting')
@@ -800,11 +709,9 @@ export function OAuthPage() {
                   })
                 }
                 placeholder={t(
-                  provider.id === 'xai'
-                    ? 'auth_login.xai_callback_placeholder'
-                    : provider.id === 'devin'
-                      ? 'auth_login.devin_callback_placeholder'
-                      : 'auth_login.oauth_callback_placeholder'
+                  provider.id === 'devin'
+                    ? 'auth_login.devin_callback_placeholder'
+                    : 'auth_login.oauth_callback_placeholder'
                 )}
               />
               <div className={styles.callbackActions}>

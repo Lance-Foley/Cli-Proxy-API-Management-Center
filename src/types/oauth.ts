@@ -9,4 +9,6 @@ export interface OAuthModelAliasEntry {
   alias: string;
   fork?: boolean;
   forceMapping?: boolean;
+  /** Backend `display-name`; not edited here, but preserved when a channel is saved. */
+  displayName?: string;
 }

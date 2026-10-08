@@ -396,11 +396,14 @@ export const normalizeOauthModelAlias = (
         if (!name || !alias) return null;
         const fork = entry.fork === true;
         const forceMappingValue = entry['force-mapping'] ?? entry.forceMapping;
+        const displayName =
+          typeof entry['display-name'] === 'string' ? entry['display-name'].trim() : '';
         const normalizedEntry: OAuthModelAliasEntry = { name, alias };
         if (fork) normalizedEntry.fork = true;
         if (typeof forceMappingValue === 'boolean') {
           normalizedEntry.forceMapping = forceMappingValue;
         }
+        if (displayName) normalizedEntry.displayName = displayName;
         return normalizedEntry;
       })
       .filter(Boolean)
@@ -432,6 +435,7 @@ export const serializeOauthModelAliases = (
     if (typeof entry.forceMapping === 'boolean') {
       payload['force-mapping'] = entry.forceMapping;
     }
+    if (entry.displayName) payload['display-name'] = entry.displayName;
     return payload;
   });
 
