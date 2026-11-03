@@ -148,7 +148,8 @@ describe('QuotaTimeline rendering', () => {
     );
 
     expect(markup).toContain('role="img"');
-    expect(markup).toContain('08/03 12:00');
+    // 2026-08-03T12:00:00Z is 07:00 in Central Daylight Time.
+    expect(markup).toContain('08/03 07:00');
   });
 
   test('stays hidden before any credential exposes a usable quota window', () => {

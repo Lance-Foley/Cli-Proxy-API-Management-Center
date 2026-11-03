@@ -18,14 +18,16 @@ import { useTranslation } from 'react-i18next';
 import { formatRelativeInstant, TYPE_COLORS } from '@/utils/quota';
 import { getQuotaCacheKey, getQuotaDisplayName } from '@/utils/quota/identity';
 import { useNow } from '@/hooks/useNow';
+import { centralParts, formatCentralDay, formatCentralTime } from '@/utils/time/centralTime';
 import type { ResolvedTheme, ThemeColors } from '@/types';
 import {
+  axisPercent,
   buildTimelineLane,
   laneHasWindow,
   projectLane,
   projectResetCredits,
+  timelineAxis,
   timelineSpan,
-  DAY_MS,
 } from '../quotaTimelineModel';
 import type { TimelineLane, TimelineMode } from '../quotaTimelineModel';
 import type { QuotaFileEntry } from '../logic';
@@ -35,14 +37,8 @@ import styles from './QuotaTimeline.module.scss';
 const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
 const pad = (value: number) => String(value).padStart(2, '0');
-const formatDay = (ms: number) => {
-  const d = new Date(ms);
-  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
-};
-const formatTime = (ms: number) => {
-  const d = new Date(ms);
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
+const formatDay = formatCentralDay;
+const formatTime = formatCentralTime;
 
 export interface QuotaTimelineProps {
   entries: QuotaFileEntry[];
@@ -83,6 +79,10 @@ export function QuotaTimeline({
   const now = nowProp ?? tick;
 
   const span = useMemo(() => timelineSpan(mode, offset, now), [mode, offset, now]);
+  const axis = useMemo(
+    () => timelineAxis(mode, span.startMs, span.endMs),
+    [mode, span.startMs, span.endMs]
+  );
   const todayLabel = t('quota_management.windows_today', { defaultValue: 'Today' });
   // This button doubles as the selected-period indicator and the shortcut back
   // to the current period. Keeping its visible text hard-coded to "Today" made
@@ -127,35 +127,29 @@ export function QuotaTimeline({
     [laneInputs, mode, span.days]
   );
 
-  /** Weekly: one cell per day. Session: one per 6 hours. */
+  /** Weekly: one cell per Central day. Session: one per 6 clock hours. */
   const cells = useMemo(() => {
     const zoomed = mode === 'session';
-    const count = zoomed ? span.days * 4 : span.days;
-    const cellMs = (span.endMs - span.startMs) / count;
-    const todayStart = new Date(now).setHours(0, 0, 0, 0);
+    const today = centralParts(now);
 
-    return Array.from({ length: count }, (_, index) => {
-      const at = span.startMs + index * cellMs;
-      const date = new Date(at);
-      const isDayStart = !zoomed || date.getHours() === 0;
+    return axis.map((cell) => {
+      const date = centralParts(cell.at);
+      const isDayStart = !zoomed || date.hour === 0;
       return {
-        at,
+        at: cell.at,
         isDayStart,
-        isToday: new Date(at).setHours(0, 0, 0, 0) === todayStart,
-        isWeekend: date.getDay() === 0 || date.getDay() === 6,
-        weekday: t(`quota_management.weekday_${WEEKDAY_KEYS[date.getDay()]}`, {
-          defaultValue: WEEKDAY_KEYS[date.getDay()],
+        isToday: date.year === today.year && date.month === today.month && date.day === today.day,
+        isWeekend: date.weekday === 0 || date.weekday === 6,
+        weekday: t(`quota_management.weekday_${WEEKDAY_KEYS[date.weekday]}`, {
+          defaultValue: WEEKDAY_KEYS[date.weekday],
         }),
-        label: isDayStart ? formatDay(at) : `${pad(date.getHours())}:00`,
+        label: isDayStart ? formatDay(cell.at) : `${pad(date.hour)}:00`,
       };
     });
-  }, [mode, span, now, t]);
+  }, [mode, axis, now, t]);
 
   // Only draw the marker when the current moment is actually on screen.
-  const nowPercent =
-    now >= span.startMs && now < span.endMs
-      ? ((now - span.startMs) / (span.endMs - span.startMs)) * 100
-      : null;
+  const nowPercent = now >= span.startMs && now < span.endMs ? axisPercent(now, axis) : null;
 
   if (!hasAnyLane) return null;
 
@@ -167,7 +161,8 @@ export function QuotaTimeline({
             {t('quota_management.windows_title', { defaultValue: 'Quota windows' })}
           </h2>
           <p className={styles.range}>
-            {formatDay(span.startMs)} – {formatDay(span.endMs - DAY_MS)}
+            {formatDay(span.startMs)} –{' '}
+            {formatDay(axis.length > 0 ? axis[axis.length - 1].at : span.startMs)}
             {' · '}
             {mode === 'weekly'
               ? t('quota_management.windows_span_weekly', { defaultValue: 'two weeks' })
@@ -326,8 +321,8 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
     [lane, span, now, mode]
   );
   const resetCredits = useMemo(
-    () => projectResetCredits(lane, span.startMs, span.endMs, now),
-    [lane, span, now]
+    () => projectResetCredits(lane, span.startMs, span.endMs, now, mode),
+    [lane, span, now, mode]
   );
 
   const colorSet = TYPE_COLORS[lane.provider] || TYPE_COLORS.unknown;

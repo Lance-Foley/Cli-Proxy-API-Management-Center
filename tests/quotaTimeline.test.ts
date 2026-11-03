@@ -7,11 +7,14 @@ import {
   pickLaneWindow,
   projectLane,
   projectResetCredits,
+  axisPercent,
   startOfDay,
   startOfWeek,
+  timelineAxis,
   timelineSpan,
   windowsIn,
 } from '../src/features/quota/quotaTimelineModel';
+import { centralParts, formatCentralDay, formatCentralTime } from '../src/utils/time/centralTime';
 import type { TimelineLane } from '../src/features/quota/quotaTimelineModel';
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m, d, h, min).getTime();
@@ -61,11 +64,13 @@ describe('windowsIn', () => {
 });
 
 describe('span boundaries', () => {
-  test('startOfDay and startOfWeek land on local midnight', () => {
-    const mid = at(2026, 6, 29, 14, 37);
-    expect(new Date(startOfDay(mid)).getHours()).toBe(0);
-    expect(new Date(startOfWeek(mid)).getDay()).toBe(0);
-    expect(new Date(startOfWeek(mid)).getHours()).toBe(0);
+  test('startOfDay and startOfWeek land on Central midnight', () => {
+    const mid = Date.parse('2026-07-29T19:37:00Z'); // 14:37 CDT
+    expect(formatCentralTime(startOfDay(mid))).toBe('00:00');
+    expect(formatCentralDay(startOfDay(mid))).toBe('07/29');
+    expect(centralParts(startOfWeek(mid)).weekday).toBe(0);
+    expect(formatCentralTime(startOfWeek(mid))).toBe('00:00');
+    expect(formatCentralDay(startOfWeek(mid))).toBe('07/26');
   });
 
   test('weekly span is a fortnight from the containing Sunday', () => {
@@ -90,11 +95,42 @@ describe('span boundaries', () => {
     expect(session.days).toBe(3);
   });
 
-  test('spans a whole number of days even across a DST transition', () => {
-    // US DST springs forward 2026-03-08; a fixed +14*DAY_MS would land at 23:00.
-    const span = timelineSpan('weekly', 0, at(2026, 2, 10, 12));
-    expect(new Date(span.startMs).getHours()).toBe(0);
-    expect(new Date(span.endMs).getHours()).toBe(0);
+  test('spans a whole number of Central days across both clock changes', () => {
+    // Spring forward is 2026-03-08. A fixed +14*DAY_MS would land at 23:00.
+    const spring = timelineSpan('weekly', 0, Date.parse('2026-03-10T17:00:00Z'));
+    expect(formatCentralTime(spring.startMs)).toBe('00:00');
+    expect(formatCentralTime(spring.endMs)).toBe('00:00');
+    expect(formatCentralDay(spring.startMs)).toBe('03/08');
+    expect(formatCentralDay(spring.endMs)).toBe('03/22');
+
+    // Fall back is 2026-11-01. Equal 24-hour steps print Sunday 11/01 twice.
+    const fall = timelineSpan('weekly', 0, Date.parse('2026-11-03T21:00:00Z'));
+    const cells = timelineAxis('weekly', fall.startMs, fall.endMs);
+    const labels = cells.map((cell) => formatCentralDay(cell.at));
+    expect(labels).toEqual([
+      '11/01',
+      '11/02',
+      '11/03',
+      '11/04',
+      '11/05',
+      '11/06',
+      '11/07',
+      '11/08',
+      '11/09',
+      '11/10',
+      '11/11',
+      '11/12',
+      '11/13',
+      '11/14',
+    ]);
+    expect(new Set(labels).size).toBe(14);
+    expect(cells.every((cell) => formatCentralTime(cell.at) === '00:00')).toBe(true);
+
+    const reset = Date.parse('2026-11-05T08:59:00Z');
+    expect(formatCentralDay(reset)).toBe('11/05');
+    expect(formatCentralTime(reset)).toBe('02:59');
+    const column = Math.floor(axisPercent(reset, cells) / (100 / cells.length));
+    expect(formatCentralDay(cells[column].at)).toBe('11/05');
   });
 });
 

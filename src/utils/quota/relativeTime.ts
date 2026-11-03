@@ -12,6 +12,7 @@
  */
 
 import { DAY_MS, HOUR_MS, MINUTE_MS } from '@/utils/time/durations';
+import { QUOTA_TIME_ZONE } from '@/utils/time/centralTime';
 
 export interface RelativeTimeParts {
   /** Signed magnitude: positive is future, negative is past. */
@@ -74,13 +75,14 @@ export function formatRelativeInstant(targetMs: number, nowMs: number, locale?: 
 }
 
 /**
- * Absolute instant in the shape every quota row already uses (`MM-DD HH:mm`,
- * browser-local, 24-hour). Kept in one place so the reset labels baked at fetch
+ * Absolute instant in the shape every quota row already uses (`MM/DD, HH:mm`,
+ * Central time, 24-hour). Kept in one place so the reset labels baked at fetch
  * time and the ones formatted at render time can never drift apart.
  */
 export function formatInstantShort(ms: number): string {
   if (!Number.isFinite(ms)) return '-';
   return new Date(ms).toLocaleString(undefined, {
+    timeZone: QUOTA_TIME_ZONE,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',

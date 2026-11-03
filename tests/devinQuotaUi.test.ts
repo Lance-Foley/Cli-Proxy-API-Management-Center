@@ -72,9 +72,11 @@ describe('Devin quota UI integration', () => {
     expect(markup).toContain('width:20%');
     expect(markup).not.toContain('width:80%');
     expect(markup).toContain('Pro');
-    expect(markup).toContain('01/02');
-    expect(markup).toContain('01/08');
-    expect(markup).not.toContain('01/01');
+    // 2099-01-02T00:00:00Z, 2099-01-08T00:00:00Z, and 2099-01-03T00:00:00Z in Central time.
+    expect(markup).toContain('01/01, 18:00');
+    expect(markup).toContain('01/07, 18:00');
+    expect(markup).toContain('01/02, 18:00');
+    expect(markup).not.toContain('01/08');
     expect(markup).not.toContain(classes.quotaMessage);
   });
 

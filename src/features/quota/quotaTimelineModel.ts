@@ -11,6 +11,13 @@
  */
 
 import { DAY_MS, HOUR_MS } from '@/utils/time/durations';
+import {
+  addCentralDays,
+  centralParts,
+  centralWallTimeToUtc,
+  startOfCentralDay,
+  startOfCentralWeek,
+} from '@/utils/time/centralTime';
 import type { QuotaProviderType } from './providers/types';
 
 export { DAY_MS, HOUR_MS };
@@ -104,27 +111,22 @@ export function windowsIn(
   return out;
 }
 
-/** Start of the local day containing `ms`. */
+/** Start of the Central day containing `ms`. */
 export function startOfDay(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+  return startOfCentralDay(ms);
 }
 
-/** Start of the local week (Sunday) containing `ms`. */
+/** Start of the Central week (Sunday) containing `ms`. */
 export function startOfWeek(ms: number): number {
-  const d = new Date(startOfDay(ms));
-  d.setDate(d.getDate() - d.getDay());
-  return d.getTime();
+  return startOfCentralWeek(ms);
 }
 
 /**
  * Visible span for a mode and offset.
  *
  * Weekly steps a week at a time from the containing Sunday; session steps a day
- * at a time from today. Uses date arithmetic rather than adding fixed
- * millisecond counts so a DST transition inside the span doesn't shift every
- * subsequent day by an hour.
+ * at a time from today. Steps use Central calendar days, so the November clock
+ * change does not slide the later days.
  */
 export function timelineSpan(
   mode: TimelineMode,
@@ -132,14 +134,75 @@ export function timelineSpan(
   now: number
 ): { startMs: number; endMs: number; days: number } {
   const days = TIMELINE_SPAN_DAYS[mode];
-  const base = new Date(mode === 'weekly' ? startOfWeek(now) : startOfDay(now));
-  base.setDate(base.getDate() + offset * (mode === 'weekly' ? 7 : 1));
-  const startMs = base.getTime();
+  const base = mode === 'weekly' ? startOfWeek(now) : startOfDay(now);
+  const startMs = addCentralDays(base, offset * (mode === 'weekly' ? 7 : 1));
+  return { startMs, endMs: addCentralDays(startMs, days), days };
+}
 
-  const end = new Date(startMs);
-  end.setDate(end.getDate() + days);
+/** One equal-width column on the timeline. */
+export interface TimelineAxisCell {
+  at: number;
+  end: number;
+}
 
-  return { startMs, endMs: end.getTime(), days };
+/**
+ * Column boundaries for a span.
+ *
+ * Weekly mode is one Central calendar day per column. Session mode is four
+ * clock blocks per day (00:00, 06:00, 12:00, 18:00). A day that gains or loses
+ * an hour at the clock change still gets one column, so the date is not printed twice.
+ */
+export function timelineAxis(
+  mode: TimelineMode,
+  startMs: number,
+  endMs: number
+): TimelineAxisCell[] {
+  const cells: TimelineAxisCell[] = [];
+  let dayStart = startMs;
+  for (let guard = 0; dayStart < endMs && guard < 400; guard += 1) {
+    const nextDay = addCentralDays(dayStart, 1);
+    if (nextDay <= dayStart) break;
+    if (mode === 'weekly') {
+      cells.push({ at: dayStart, end: Math.min(nextDay, endMs) });
+    } else {
+      const parts = centralParts(dayStart);
+      const marks = [0, 6, 12, 18];
+      for (let index = 0; index < marks.length; index += 1) {
+        const at = centralWallTimeToUtc(parts.year, parts.month, parts.day, marks[index]);
+        const end =
+          index + 1 < marks.length
+            ? centralWallTimeToUtc(parts.year, parts.month, parts.day, marks[index + 1])
+            : nextDay;
+        if (end <= startMs || at >= endMs) continue;
+        cells.push({ at: Math.max(at, startMs), end: Math.min(end, endMs) });
+      }
+    }
+    dayStart = nextDay;
+  }
+  return cells;
+}
+
+/**
+ * Position of `ms` on an equal-width column axis, as a percent of the span.
+ *
+ * Time inside a column uses that column's real length, so a 25-hour fallback
+ * day still fills exactly one column.
+ */
+export function axisPercent(ms: number, cells: readonly TimelineAxisCell[]): number {
+  if (cells.length === 0) return 0;
+  const first = cells[0].at;
+  const last = cells[cells.length - 1].end;
+  if (ms <= first) return 0;
+  if (ms >= last) return 100;
+  for (let index = 0; index < cells.length; index += 1) {
+    const cell = cells[index];
+    if (ms >= cell.end && index < cells.length - 1) continue;
+    const length = cell.end - cell.at;
+    const fraction = length > 0 ? (ms - cell.at) / length : 0;
+    const clamped = Math.min(1, Math.max(0, fraction));
+    return ((index + clamped) / cells.length) * 100;
+  }
+  return 100;
 }
 
 /**
@@ -159,10 +222,10 @@ export function projectLane(
   if (lane.anchorMs === null || !periodHours) return [];
   if (mode === 'session' && periodHours !== SESSION_PERIOD_HOURS) return [];
 
-  const span = spanEndMs - spanStartMs;
-  if (span <= 0) return [];
+  if (!(spanEndMs > spanStartMs)) return [];
 
-  const toPercent = (ms: number) => ((ms - spanStartMs) / span) * 100;
+  const axis = timelineAxis(mode, spanStartMs, spanEndMs);
+  const toPercent = (ms: number) => axisPercent(ms, axis);
 
   return windowsIn(lane.anchorMs, periodHours * HOUR_MS, spanStartMs, spanEndMs)
     .map((window): TimelineWindow | null => {
@@ -192,10 +255,11 @@ export function projectResetCredits(
   lane: TimelineLane,
   spanStartMs: number,
   spanEndMs: number,
-  now: number
+  now: number,
+  mode: TimelineMode = 'weekly'
 ): TimelineResetCreditMark[] {
-  const span = spanEndMs - spanStartMs;
-  if (span <= 0) return [];
+  if (!(spanEndMs > spanStartMs)) return [];
+  const axis = timelineAxis(mode, spanStartMs, spanEndMs);
 
   return lane.resetCredits
     .filter(
@@ -206,7 +270,7 @@ export function projectResetCredits(
     )
     .map((credit) => ({
       ...credit,
-      leftPercent: ((credit.expiresAtMs - spanStartMs) / span) * 100,
+      leftPercent: axisPercent(credit.expiresAtMs, axis),
     }));
 }
 
