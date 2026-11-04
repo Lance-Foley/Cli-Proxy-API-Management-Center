@@ -155,6 +155,47 @@ export function timelineSpan(
   return { startMs, endMs: end.getTime(), days };
 }
 
+export interface TimelineCell {
+  startMs: number;
+  endMs: number;
+  /** Share of the span, so a 25-hour DST day gets a slightly wider column. */
+  widthPercent: number;
+}
+
+/**
+ * Axis cells for a span: one per local day (weekly) or per six local hours
+ * (session).
+ *
+ * Boundaries come from calendar arithmetic, not `span / count`. Dividing a span
+ * that holds a DST change into equal slices puts every later boundary an hour
+ * off midnight, so labels drift onto the previous evening and the "now" line
+ * lands in the column of the previous day.
+ */
+export function timelineCells(
+  mode: TimelineMode,
+  span: { startMs: number; endMs: number; days: number }
+): TimelineCell[] {
+  const total = span.endMs - span.startMs;
+  if (!(total > 0) || !(span.days > 0)) return [];
+
+  const hoursPerCell = mode === 'session' ? 6 : 24;
+  const cellsPerDay = 24 / hoursPerCell;
+  const starts: number[] = [];
+  for (let day = 0; day < span.days; day += 1) {
+    for (let slot = 0; slot < cellsPerDay; slot += 1) {
+      const d = new Date(span.startMs);
+      d.setDate(d.getDate() + day);
+      d.setHours(slot * hoursPerCell, 0, 0, 0);
+      starts.push(d.getTime());
+    }
+  }
+
+  return starts.map((startMs, index) => {
+    const endMs = index + 1 < starts.length ? starts[index + 1] : span.endMs;
+    return { startMs, endMs, widthPercent: ((endMs - startMs) / total) * 100 };
+  });
+}
+
 /**
  * Project one lane's windows onto a span, clipped and positioned.
  *
