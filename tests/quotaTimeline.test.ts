@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import {
   DAY_MS,
   HOUR_MS,
@@ -9,6 +9,7 @@ import {
   projectResetCredits,
   startOfDay,
   startOfWeek,
+  timelineCells,
   timelineSpan,
   windowsIn,
 } from '../src/features/quota/quotaTimelineModel';
@@ -90,6 +91,56 @@ describe('span boundaries', () => {
     const sessionNext = timelineSpan('session', 1, now);
     expect(Math.round((sessionNext.startMs - session.startMs) / DAY_MS)).toBe(1);
     expect(session.days).toBe(3);
+  });
+
+  describe('axis cells across the November DST fall-back (America/Chicago)', () => {
+    let previousTz: string | undefined;
+    beforeAll(() => {
+      previousTz = process.env.TZ;
+      process.env.TZ = 'America/Chicago';
+    });
+    afterAll(() => {
+      // `bun test` runs in UTC when TZ is unset; deleting TZ would fall back to
+      // the machine zone and leak into later files.
+      process.env.TZ = previousTz ?? 'Etc/UTC';
+    });
+
+    // 2026-11-01 is a 25-hour day. Wednesday 2026-11-04 07:07 must sit in the
+    // column labelled Wed 11/04, and no date may repeat.
+    test('weekly cells start on each local midnight', () => {
+      const now = at(2026, 10, 4, 7, 7);
+      const span = timelineSpan('weekly', 0, now);
+      const cells = timelineCells('weekly', span);
+
+      expect(cells.length).toBe(14);
+      cells.forEach((cell, index) => {
+        const date = new Date(cell.startMs);
+        expect(date.getHours()).toBe(0);
+        expect(date.getDate()).toBe(1 + index);
+        expect(date.getDay()).toBe(index % 7);
+      });
+
+      const nowCell = cells.find((cell) => cell.startMs <= now && now < cell.endMs);
+      expect(nowCell && new Date(nowCell.startMs).getDay()).toBe(3);
+      expect(nowCell && new Date(nowCell.startMs).getDate()).toBe(4);
+
+      // Widths follow real durations so bars stay aligned with the grid.
+      const total = cells.reduce((sum, cell) => sum + cell.widthPercent, 0);
+      expect(Math.abs(total - 100)).toBeLessThan(1e-9);
+      expect(cells[0].widthPercent).toBeCloseTo((25 / 337) * 100, 9);
+      expect(cells[1].widthPercent).toBeCloseTo((24 / 337) * 100, 9);
+    });
+
+    test('session cells fall on 00/06/12/18 local time', () => {
+      const span = timelineSpan('session', 0, at(2026, 10, 1, 9));
+      const cells = timelineCells('session', span);
+
+      expect(cells.length).toBe(12);
+      expect(cells.map((cell) => new Date(cell.startMs).getHours())).toEqual([
+        0, 6, 12, 18, 0, 6, 12, 18, 0, 6, 12, 18,
+      ]);
+      expect(cells[cells.length - 1].endMs).toBe(span.endMs);
+    });
   });
 
   test('spans a whole number of days even across a DST transition', () => {

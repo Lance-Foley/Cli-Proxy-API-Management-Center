@@ -24,6 +24,7 @@ import {
   laneHasWindow,
   projectLane,
   projectResetCredits,
+  timelineCells,
   timelineSpan,
   DAY_MS,
 } from '../quotaTimelineModel';
@@ -130,16 +131,16 @@ export function QuotaTimeline({
   /** Weekly: one cell per day. Session: one per 6 hours. */
   const cells = useMemo(() => {
     const zoomed = mode === 'session';
-    const count = zoomed ? span.days * 4 : span.days;
-    const cellMs = (span.endMs - span.startMs) / count;
     const todayStart = new Date(now).setHours(0, 0, 0, 0);
 
-    return Array.from({ length: count }, (_, index) => {
-      const at = span.startMs + index * cellMs;
+    return timelineCells(mode, span).map(({ startMs: at, widthPercent }) => {
       const date = new Date(at);
       const isDayStart = !zoomed || date.getHours() === 0;
       return {
         at,
+        // Flex-grow by real duration keeps the grid aligned with bars, which
+        // are positioned by milliseconds (a DST day is 23 or 25 hours).
+        style: { flexGrow: widthPercent } as CSSProperties,
         isDayStart,
         isToday: new Date(at).setHours(0, 0, 0, 0) === todayStart,
         isWeekend: date.getDay() === 0 || date.getDay() === 6,
@@ -241,6 +242,7 @@ export function QuotaTimeline({
                 {cells.map((cell) => (
                   <div
                     key={cell.at}
+                    style={cell.style}
                     className={styles.axisCell}
                     data-today={cell.isToday ? 1 : 0}
                     data-weekend={cell.isWeekend ? 1 : 0}
@@ -313,7 +315,7 @@ interface LaneProps {
   span: { startMs: number; endMs: number; days: number };
   now: number;
   mode: TimelineMode;
-  cells: { at: number; isWeekend: boolean; isDayStart: boolean }[];
+  cells: { at: number; style: CSSProperties; isWeekend: boolean; isDayStart: boolean }[];
   nowPercent: number | null;
   resolvedTheme: ResolvedTheme;
 }
@@ -369,6 +371,7 @@ function Lane({ lane, span, now, mode, cells, nowPercent, resolvedTheme }: LaneP
           {cells.map((cell) => (
             <span
               key={cell.at}
+              style={cell.style}
               data-weekend={cell.isWeekend ? 1 : 0}
               data-daystart={cell.isDayStart ? 1 : 0}
             />
